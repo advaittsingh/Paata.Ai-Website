@@ -157,7 +157,7 @@ async function convertSpeechToText(audioFile: File): Promise<string> {
     
     // Initialize OpenAI client
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || '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',
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
     // Convert audio file to buffer
@@ -205,7 +205,7 @@ async function generateAIResponse(
   try {
     // Initialize OpenAI client
     const openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || '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',
+      apiKey: process.env.OPENAI_API_KEY,
     });
 
     // Detect language from the transcribed text

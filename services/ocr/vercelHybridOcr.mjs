@@ -2,7 +2,7 @@ import axios from 'axios';
 
 class VercelHybridOCRService {
   constructor() {
-    this.geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || 'AIzaSyBK849tqp6MTHIlZ-BqNg7PtncNPW57K8I';
+    this.geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
     this.openaiApiKey = process.env.OPENAI_API_KEY;
     this.isGeminiConfigured = !!this.geminiApiKey;
     this.isOpenAIConfigured = !!this.openaiApiKey;
