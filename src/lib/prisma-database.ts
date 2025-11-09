@@ -32,11 +32,27 @@ function createPrismaClient() {
     throw new Error('DATABASE_URL or PRISMA_DATABASE_URL environment variable is required');
   }
   
+  // CRITICAL: Check if trying to use SQLite (won't work on Vercel)
+  if (databaseUrl.startsWith('file:') || databaseUrl.includes('dev.db')) {
+    console.error('[Prisma] ERROR: SQLite connection string detected!');
+    console.error('[Prisma] SQLite does not work on Vercel. Please use PostgreSQL.');
+    console.error('[Prisma] Current DATABASE_URL:', databaseUrl.substring(0, 50) + '...');
+    throw new Error('SQLite is not supported on Vercel. Please set DATABASE_URL to a PostgreSQL connection string.');
+  }
+  
   // Check if we're using Prisma Accelerate (connection string starts with prisma+)
   const isUsingAccelerate = databaseUrl.startsWith('prisma+');
   
-  console.log('[Prisma] Creating client with:', isUsingAccelerate ? 'Prisma Accelerate' : 'Direct connection');
-  console.log('[Prisma] Connection string preview:', databaseUrl.substring(0, 30) + '...');
+  // Verify it's PostgreSQL
+  if (!databaseUrl.startsWith('postgresql://') && !databaseUrl.startsWith('postgres://') && !isUsingAccelerate) {
+    console.error('[Prisma] ERROR: Invalid database connection string!');
+    console.error('[Prisma] Expected postgresql:// or prisma+postgres://');
+    console.error('[Prisma] Got:', databaseUrl.substring(0, 50) + '...');
+    throw new Error('Invalid DATABASE_URL format. Expected PostgreSQL connection string.');
+  }
+  
+  console.log('[Prisma] Creating client with:', isUsingAccelerate ? 'Prisma Accelerate' : 'PostgreSQL Direct connection');
+  console.log('[Prisma] Connection string preview:', databaseUrl.substring(0, 50) + '...');
   
   const baseClient = new PrismaClient({
     datasources: {
