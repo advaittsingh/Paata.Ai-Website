@@ -27,16 +27,24 @@ function createPrismaClient() {
   // Otherwise fall back to DATABASE_URL
   const databaseUrl = process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL;
   
+  if (!databaseUrl) {
+    console.error('[Prisma] No DATABASE_URL or PRISMA_DATABASE_URL found!');
+    throw new Error('DATABASE_URL or PRISMA_DATABASE_URL environment variable is required');
+  }
+  
   // Check if we're using Prisma Accelerate (connection string starts with prisma+)
-  const isUsingAccelerate = databaseUrl?.startsWith('prisma+');
+  const isUsingAccelerate = databaseUrl.startsWith('prisma+');
+  
+  console.log('[Prisma] Creating client with:', isUsingAccelerate ? 'Prisma Accelerate' : 'Direct connection');
+  console.log('[Prisma] Connection string preview:', databaseUrl.substring(0, 30) + '...');
   
   const baseClient = new PrismaClient({
-    datasources: databaseUrl ? {
+    datasources: {
       db: {
         url: databaseUrl,
       },
-    } : undefined,
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    },
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn', 'query'] : ['error'],
   });
   
   // Extend with Accelerate if using Accelerate connection string
