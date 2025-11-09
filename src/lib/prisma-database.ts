@@ -93,25 +93,15 @@ function getPrismaClient(): ReturnType<typeof createPrismaClient> {
   // Check if DATABASE_URL is available (might not be during build)
   const databaseUrl = process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL;
   if (!databaseUrl) {
-    // During build, DATABASE_URL might not be available
-    // Return a mock client that throws helpful errors when methods are called
-    // This prevents build-time errors while still catching runtime issues
-    return {
-      $connect: async () => { throw new Error('DATABASE_URL not available during build'); },
-      $disconnect: async () => {},
-      $extends: () => { throw new Error('DATABASE_URL not available during build'); },
-      $on: () => {},
-      $transaction: async () => { throw new Error('DATABASE_URL not available during build'); },
-      $use: () => {},
-      $queryRaw: async () => { throw new Error('DATABASE_URL not available during build'); },
-      $queryRawUnsafe: async () => { throw new Error('DATABASE_URL not available during build'); },
-      $executeRaw: async () => { throw new Error('DATABASE_URL not available during build'); },
-      $executeRawUnsafe: async () => { throw new Error('DATABASE_URL not available during build'); },
-      user: { findUnique: async () => { throw new Error('DATABASE_URL not available during build'); } },
-      achievement: { count: async () => { throw new Error('DATABASE_URL not available during build'); } },
-    } as any;
+    // During build or if DATABASE_URL is missing, throw a clear error
+    const errorMsg = 'DATABASE_URL or PRISMA_DATABASE_URL environment variable is required. Please set it in Vercel environment variables.';
+    console.error('[Prisma]', errorMsg);
+    console.error('[Prisma] Current NODE_ENV:', process.env.NODE_ENV);
+    console.error('[Prisma] PRISMA_DATABASE_URL exists:', !!process.env.PRISMA_DATABASE_URL);
+    console.error('[Prisma] DATABASE_URL exists:', !!process.env.DATABASE_URL);
+    throw new Error(errorMsg);
   }
-
+    
   // Create new instance
   const client = createPrismaClient();
   globalForPrisma.prisma = client;
