@@ -207,6 +207,51 @@ export function NavbarClient() {
             {isAuthenticated && (
               <>
                 <li>
+                  <p className="block antialiased font-sans text-xs leading-normal font-semibold text-gray-400 uppercase tracking-wider mb-2 mt-2">
+                    Smart Learning
+                  </p>
+                </li>
+                <li>
+                  <Link href="/app" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    💬 Chat
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/notes" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    📝 Notes
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/flashcards" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    💡 Flashcards
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/mindmaps" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    🗺️ Mind Maps
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/exam" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    📋 Exam Mode
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/focus" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    🧠 Focus Mode
+                  </Link>
+                </li>
+                <li>
+                  <Link href="/app/progress" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
+                    📊 Progress
+                  </Link>
+                </li>
+                <li className="mt-4">
+                  <p className="block antialiased font-sans text-xs leading-normal font-semibold text-gray-400 uppercase tracking-wider mb-2">
+                    Account
+                  </p>
+                </li>
+                <li>
                   <Link href="/profile" className="block antialiased font-sans text-sm leading-normal font-medium text-white hover:text-gray-300 transition-colors duration-200">
                     Profile
                   </Link>

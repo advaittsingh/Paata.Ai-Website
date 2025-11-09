@@ -35,9 +35,31 @@ export default function AppSidebar({ sidebarOpen, setSidebarOpen, children }: Ap
   ];
 
   return (
-    <div className={`${sidebarOpen ? 'w-64' : 'w-0'} transition-all duration-300 ease-in-out bg-gray-900 flex flex-col overflow-hidden shadow-xl`}>
-      {/* Sidebar Header */}
-      <div className={`pb-4 px-4 bg-gray-900 ${children ? 'border-b border-gray-700' : ''} pt-4 flex-shrink-0`}>
+    <>
+      {/* Mobile Backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black bg-opacity-50 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      
+      {/* Sidebar */}
+      <div className={`
+        ${sidebarOpen ? 'w-64' : 'w-0'} 
+        lg:relative lg:z-auto
+        fixed lg:static
+        top-0 left-0
+        h-full lg:h-auto
+        z-50
+        transition-all duration-300 ease-in-out 
+        bg-gray-900 
+        flex flex-col 
+        overflow-hidden 
+        shadow-xl
+      `}>
+        {/* Sidebar Header */}
+        <div className={`pb-4 px-4 bg-gray-900 ${children ? 'border-b border-gray-700' : ''} pt-4 flex-shrink-0`}>
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-gray-900 rounded-xl flex items-center justify-center shadow-lg">
@@ -90,6 +112,12 @@ export default function AppSidebar({ sidebarOpen, setSidebarOpen, children }: Ap
                     <Link
                       key={item.href}
                       href={item.href}
+                      onClick={() => {
+                        // Close sidebar on mobile when link is clicked
+                        if (window.innerWidth < 1024) {
+                          setSidebarOpen(false);
+                        }
+                      }}
                       className={`flex items-center gap-3 p-2.5 rounded-lg transition-all duration-200 ${
                         active
                           ? 'bg-gray-800 text-white shadow-md'
@@ -116,7 +144,8 @@ export default function AppSidebar({ sidebarOpen, setSidebarOpen, children }: Ap
         </div>
       )}
       
-    </div>
+      </div>
+    </>
   );
 }
 
