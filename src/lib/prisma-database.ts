@@ -135,13 +135,19 @@ export interface User {
 export class PrismaDatabase {
   static async getUserByEmail(email: string): Promise<User | null> {
     try {
+      console.log(`[PrismaDatabase] Getting user by email: ${email}`);
+      console.log(`[PrismaDatabase] DATABASE_URL exists: ${!!process.env.DATABASE_URL}`);
+      console.log(`[PrismaDatabase] DATABASE_URL starts with: ${process.env.DATABASE_URL?.substring(0, 20)}...`);
+      
       const user = await prisma.user.findUnique({
         where: { email }
       });
       
+      console.log(`[PrismaDatabase] User found: ${!!user}`);
+      
       if (!user) return null;
       
-      return {
+      const parsedUser = {
         ...user,
         preferences: typeof user.preferences === 'string' 
           ? JSON.parse(user.preferences) 
@@ -152,9 +158,16 @@ export class PrismaDatabase {
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       };
-    } catch (error) {
-      console.error('Error getting user by email:', error);
-      return null;
+      
+      console.log(`[PrismaDatabase] User parsed successfully: ${parsedUser.email}`);
+      return parsedUser;
+    } catch (error: any) {
+      console.error('[PrismaDatabase] Error getting user by email:', error);
+      console.error('[PrismaDatabase] Error message:', error?.message);
+      console.error('[PrismaDatabase] Error code:', error?.code);
+      console.error('[PrismaDatabase] Error stack:', error?.stack);
+      // Re-throw the error so the caller can handle it
+      throw error;
     }
   }
 

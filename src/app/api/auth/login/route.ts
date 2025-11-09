@@ -54,10 +54,25 @@ export async function POST(request: NextRequest) {
     const { email, password } = requestBody;
 
     if (!email || !password) {
+      console.error('[Login] Missing email or password');
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 });
     }
 
-    const user = await PrismaDatabase.getUserByEmail(email);
+    console.log(`[Login] Attempting to find user with email: ${email}`);
+    
+    let user;
+    try {
+      user = await PrismaDatabase.getUserByEmail(email);
+    } catch (dbError: any) {
+      console.error('[Login] Database error:', dbError);
+      console.error('[Login] Database error message:', dbError?.message);
+      console.error('[Login] Database error stack:', dbError?.stack);
+      return NextResponse.json({ 
+        error: 'Database connection error. Please try again later.',
+        details: process.env.NODE_ENV === 'development' ? dbError?.message : undefined
+      }, { status: 500 });
+    }
+    
     if (!user) {
       console.log(`[Login] User not found for email: ${email}`);
       // Don't reveal if user exists or not for security
