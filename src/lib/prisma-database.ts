@@ -23,10 +23,19 @@ function hasBoardModel(client: any): boolean {
 
 // Create or reuse Prisma client instance with Accelerate
 function createPrismaClient() {
+  // Use PRISMA_DATABASE_URL if set (for when DATABASE_URL is managed by Vercel Postgres)
+  // Otherwise fall back to DATABASE_URL
+  const databaseUrl = process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL;
+  
   // Check if we're using Prisma Accelerate (connection string starts with prisma+)
-  const isUsingAccelerate = process.env.DATABASE_URL?.startsWith('prisma+');
+  const isUsingAccelerate = databaseUrl?.startsWith('prisma+');
   
   const baseClient = new PrismaClient({
+    datasources: databaseUrl ? {
+      db: {
+        url: databaseUrl,
+      },
+    } : undefined,
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   });
   
