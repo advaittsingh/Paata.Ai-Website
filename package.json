@@ -8,7 +8,7 @@
   "homepage": "https://paataai.com",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "predeploy": "npm run build",

@@ -17,12 +17,29 @@ interface ErrorLogOptions {
  * Initialize error logging (Sentry)
  * Call this once in your app initialization
  */
+// Helper function to dynamically require Sentry (prevents webpack from analyzing it)
+function tryRequireSentry() {
+  try {
+    // Use Function constructor to prevent webpack from statically analyzing this require
+    const requireSentry = new Function('moduleName', 'return require(moduleName)');
+    return requireSentry('@sentry/nextjs');
+  } catch (error) {
+    return null;
+  }
+}
+
 export function initErrorLogging() {
   // Only initialize in production or if explicitly enabled
   if (process.env.NODE_ENV === 'production' && process.env.NEXT_PUBLIC_SENTRY_DSN) {
     try {
-      // Dynamic import to avoid bundling Sentry in development
-      const Sentry = require('@sentry/nextjs');
+      // Try to load Sentry dynamically (won't fail build if package is missing)
+      const Sentry = tryRequireSentry();
+      
+      if (!Sentry) {
+        console.warn('Sentry package not installed, skipping initialization');
+        console.log('ℹ️ Error logging initialized (console only)');
+        return false;
+      }
       
       Sentry.init({
         dsn: process.env.NEXT_PUBLIC_SENTRY_DSN,
