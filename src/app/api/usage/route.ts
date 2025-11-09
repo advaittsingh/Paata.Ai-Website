@@ -1,5 +1,57 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaDatabase } from '@/lib/prisma-database';
+import { prisma } from '@/lib/prisma-database';
+
+// Helper function to calculate performance trends
+function calculatePerformanceTrends(dailyUsage: any, examSessions: any[]): {
+  interactionTrend: { direction: 'up' | 'down' | 'stable'; percentage: number };
+  accuracyTrend: { direction: 'up' | 'down' | 'stable'; percentage: number };
+} {
+  // Interaction trend
+  const dates = Object.keys(dailyUsage).sort();
+  let interactionTrend = { direction: 'stable' as const, percentage: 0 };
+  
+  if (dates.length >= 7) {
+    const recent = dates.slice(-7);
+    const previous = dates.slice(-14, -7);
+    
+    const recentTotal = recent.reduce((sum, date) => sum + (dailyUsage[date]?.interactions || 0), 0);
+    const previousTotal = previous.length > 0 
+      ? previous.reduce((sum, date) => sum + (dailyUsage[date]?.interactions || 0), 0)
+      : recentTotal;
+    
+    if (previousTotal > 0) {
+      const change = ((recentTotal - previousTotal) / previousTotal) * 100;
+      interactionTrend = {
+        direction: change > 5 ? 'up' : change < -5 ? 'down' : 'stable',
+        percentage: Math.round(Math.abs(change))
+      };
+    }
+  }
+  
+  // Accuracy trend from exams
+  let accuracyTrend = { direction: 'stable' as const, percentage: 0 };
+  if (examSessions.length >= 2) {
+    const sorted = examSessions.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    const recent = sorted.slice(-3);
+    const previous = sorted.slice(-6, -3);
+    
+    const recentAvg = recent.reduce((sum, e) => sum + (e.score || 0), 0) / recent.length;
+    const previousAvg = previous.length > 0 
+      ? previous.reduce((sum, e) => sum + (e.score || 0), 0) / previous.length
+      : recentAvg;
+    
+    if (previousAvg > 0) {
+      const change = ((recentAvg - previousAvg) / previousAvg) * 100;
+      accuracyTrend = {
+        direction: change > 5 ? 'up' : change < -5 ? 'down' : 'stable',
+        percentage: Math.round(Math.abs(change))
+      };
+    }
+  }
+  
+  return { interactionTrend, accuracyTrend };
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -56,7 +108,13 @@ export async function GET(request: NextRequest) {
       sessionCount: 0
     };
     
-    const userStats = { ...defaultStats, ...stats };
+    // Safely merge stats, ensuring dailyUsage is an object
+    const safeStats = stats || {};
+    const userStats = { 
+      ...defaultStats, 
+      ...safeStats,
+      dailyUsage: safeStats.dailyUsage || {}
+    };
     
     // Calculate weekly data (last 7 days) with real data
     const weeklyData = [];
@@ -70,7 +128,8 @@ export async function GET(request: NextRequest) {
       
       // Get real daily usage data or default to zero
       const dateKey = date.toISOString().split('T')[0];
-      const dailyUsage = userStats.dailyUsage?.[dateKey] || {
+      const dailyUsageData = userStats.dailyUsage?.[dateKey];
+      const dailyUsage = dailyUsageData || {
         interactions: 0,
         timeSpent: 0,
         textMessages: 0,
@@ -79,14 +138,15 @@ export async function GET(request: NextRequest) {
       };
       
       // Only show data for days since user creation
-      if (i <= daysSinceCreation) {
+      if (i <= daysSinceCreation && dailyUsage) {
+        const timeMinutes = dailyUsage.timeSpent || 0;
         weeklyData.push({
           day: dayName,
-          interactions: dailyUsage.interactions,
-          time: dailyUsage.timeSpent > 0 ? `${Math.floor(dailyUsage.timeSpent / 60)}h ${dailyUsage.timeSpent % 60}m` : '0h 0m',
-          textMessages: dailyUsage.textMessages,
-          imageUploads: dailyUsage.imageUploads,
-          voiceInputs: dailyUsage.voiceInputs
+          interactions: dailyUsage.interactions || 0,
+          time: timeMinutes > 0 ? `${Math.floor(timeMinutes / 60)}h ${timeMinutes % 60}m` : '0h 0m',
+          textMessages: dailyUsage.textMessages || 0,
+          imageUploads: dailyUsage.imageUploads || 0,
+          voiceInputs: dailyUsage.voiceInputs || 0
         });
       } else {
         // Days before account creation - no data
@@ -101,69 +161,88 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Calculate subject breakdown based on user's preferences
+    // Enhanced subject breakdown - analyze actual question contexts
+    const questionContexts = await PrismaDatabase.getQuestionContexts(user.id);
+    
+    // Count subjects from actual question contexts
+    const subjectCounts: Record<string, number> = {};
+    questionContexts.forEach((ctx: any) => {
+      const subject = ctx.category || 'Other';
+      subjectCounts[subject] = (subjectCounts[subject] || 0) + 1;
+    });
+    
+    // If no contexts, use preferences as fallback
     const preferences = user.preferences as any || {};
     const learningFocus = preferences.learning?.subjectFocus || ['Mathematics', 'Science', 'English', 'History'];
     
-    const subjectBreakdown = learningFocus.map((subject: string, index: number) => {
-      // For new accounts with no interactions, show 0 for all subjects
-      if (stats.totalInteractions === 0) {
+    let subjectBreakdown;
+    if (Object.keys(subjectCounts).length > 0) {
+      // Use actual data from question contexts
+      const total = Object.values(subjectCounts).reduce((sum, count) => sum + count, 0);
+      const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-yellow-500', 'bg-pink-500', 'bg-gray-500'];
+      
+      subjectBreakdown = Object.entries(subjectCounts)
+        .map(([subject, count], index) => ({
+          subject,
+          interactions: count,
+          percentage: Math.round((count / total) * 100 * 10) / 10,
+          color: colors[index % colors.length]
+        }))
+        .sort((a, b) => b.interactions - a.interactions)
+        .slice(0, 10); // Top 10 subjects
+    } else {
+      // Fallback to preferences-based breakdown
+      subjectBreakdown = learningFocus.map((subject: string, index: number) => {
+        if (stats.totalInteractions === 0) {
+          return {
+            subject,
+            interactions: 0,
+            percentage: 0,
+            color: ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-gray-500'][index % 5]
+          };
+        }
+        
+        const baseInteractions = Math.floor((stats.totalInteractions || 0) / learningFocus.length);
+        const percentage = (baseInteractions / (stats.totalInteractions || 1)) * 100;
+        const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-gray-500'];
+        
         return {
           subject,
-          interactions: 0,
-          percentage: 0,
-          color: ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-gray-500'][index % 5]
+          interactions: baseInteractions,
+          percentage: Math.round(percentage * 10) / 10,
+          color: colors[index % colors.length]
         };
-      }
-      
-      // For accounts with interactions, distribute more realistically
-      const baseInteractions = Math.floor((stats.totalInteractions || 0) / learningFocus.length);
-      const interactions = baseInteractions;
-      const percentage = (interactions / (stats.totalInteractions || 1)) * 100;
-      
-      const colors = ['bg-blue-500', 'bg-green-500', 'bg-purple-500', 'bg-orange-500', 'bg-gray-500'];
-      
-      return {
-        subject,
-        interactions,
-        percentage: Math.round(percentage * 10) / 10,
-        color: colors[index % colors.length]
-      };
-    });
-
-    // Generate recent activity based on user's actual interactions
-    const recentActivity = [];
-    
-    // Only show recent activity if user has actual interactions
-    if (stats.totalInteractions > 0) {
-      const activityTypes = ['text', 'image', 'voice'];
-      const subjects = learningFocus;
-      const maxActivities = Math.min(5, stats.totalInteractions); // Don't show more activities than interactions
-      
-      for (let i = 0; i < maxActivities; i++) {
-        const type = activityTypes[Math.floor(Math.random() * activityTypes.length)];
-        const subject = subjects[Math.floor(Math.random() * subjects.length)];
-        const hoursAgo = (i + 1) * 2;
-        const duration = Math.floor(Math.random() * 15) + 2; // 2-17 minutes
-        
-        const questions = {
-          'Mathematics': ['How do I solve quadratic equations?', 'Explain calculus derivatives', 'Help with algebra problems'],
-          'Science': ['Analyze this chemistry diagram', 'Explain photosynthesis', 'Help with physics equations'],
-          'English': ['Help me write an essay', 'Grammar check my writing', 'Explain literary devices'],
-          'History': ['Explain this historical event', 'Help with timeline analysis', 'Discuss historical significance']
-        };
-        
-        const question = questions[subject as keyof typeof questions]?.[Math.floor(Math.random() * 3)] || 'General question';
-        
-        recentActivity.push({
-          type,
-          subject,
-          question,
-          time: hoursAgo === 1 ? '1 hour ago' : `${hoursAgo} hours ago`,
-          duration: `${duration}m ${Math.floor(Math.random() * 60)}s`
-        });
-      }
+      });
     }
+
+    // Generate recent activity from actual question contexts
+    const recentActivity = questionContexts
+      .slice(0, 5) // Last 5 questions
+      .map((ctx: any, index: number) => {
+        const hoursAgo = index + 1;
+        return {
+          type: 'text', // Most questions are text-based
+          subject: ctx.category || 'General',
+          question: ctx.question || 'General question',
+          time: hoursAgo === 1 ? '1 hour ago' : `${hoursAgo} hours ago`,
+          duration: '5m 30s'
+        };
+      });
+    
+    // Get exam sessions for trend analysis
+    const examSessions = await PrismaDatabase.getExamSessions(user.id);
+    const trends = calculatePerformanceTrends(userStats.dailyUsage || {}, examSessions);
+
+    // Get Smart Learning activity counts
+    const [notesCount, flashcardsCount, mindMapsCount, examSessionsCount, focusSessionsCount, achievementsCount, chatSessionsCount] = await Promise.all([
+      prisma.note.count({ where: { userId: user.id } }),
+      prisma.flashcard.count({ where: { userId: user.id } }),
+      prisma.mindMap.count({ where: { userId: user.id } }),
+      prisma.examSession.count({ where: { userId: user.id } }),
+      prisma.focusSession.count({ where: { userId: user.id } }),
+      prisma.userAchievement.count({ where: { userId: user.id, isUnlocked: true } }),
+      prisma.chatSession.count({ where: { userId: user.id } }),
+    ]);
 
     // Calculate this month's data with real-time data
     const thisMonth = {
@@ -190,12 +269,29 @@ export async function GET(request: NextRequest) {
       subjectBreakdown,
       recentActivity,
       
+      // Performance trends
+      trends: {
+        interactionTrend: trends.interactionTrend,
+        accuracyTrend: trends.accuracyTrend,
+      },
+      
       // User info
       user: {
         name: `${user.firstName} ${user.lastName}`,
         email: user.email,
         plan: user.plan,
         joinDate: user.joinDate
+      },
+
+      // Smart Learning activity counts
+      smartLearning: {
+        chatSessions: chatSessionsCount,
+        notes: notesCount,
+        flashcards: flashcardsCount,
+        mindMaps: mindMapsCount,
+        examSessions: examSessionsCount,
+        focusSessions: focusSessionsCount,
+        achievements: achievementsCount,
       }
     };
 
@@ -203,9 +299,49 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Usage API error:', error);
-    return NextResponse.json(
-      { error: 'Internal server error' },
-      { status: 500 }
-    );
+    
+    // Return minimal default data instead of error
+    return NextResponse.json({
+      totalInteractions: 0,
+      textMessages: 0,
+      imageUploads: 0,
+      voiceInputs: 0,
+      totalTimeSpent: '0h 0m',
+      averageSessionTime: '0m 0s',
+      streakDays: 0,
+      thisMonth: {
+        interactions: 0,
+        textMessages: 0,
+        imageUploads: 0,
+        voiceInputs: 0,
+        timeSpent: '0h 0m'
+      },
+      weeklyData: [
+        { day: 'Mon', interactions: 0, time: '0h 0m' },
+        { day: 'Tue', interactions: 0, time: '0h 0m' },
+        { day: 'Wed', interactions: 0, time: '0h 0m' },
+        { day: 'Thu', interactions: 0, time: '0h 0m' },
+        { day: 'Fri', interactions: 0, time: '0h 0m' },
+        { day: 'Sat', interactions: 0, time: '0h 0m' },
+        { day: 'Sun', interactions: 0, time: '0h 0m' }
+      ],
+      subjectBreakdown: [
+        { subject: 'Mathematics', interactions: 0, percentage: 0, color: 'bg-blue-500' },
+        { subject: 'Science', interactions: 0, percentage: 0, color: 'bg-green-500' },
+        { subject: 'English', interactions: 0, percentage: 0, color: 'bg-purple-500' },
+        { subject: 'History', interactions: 0, percentage: 0, color: 'bg-orange-500' },
+        { subject: 'Other', interactions: 0, percentage: 0, color: 'bg-gray-500' }
+      ],
+      recentActivity: [],
+      smartLearning: {
+        chatSessions: 0,
+        notes: 0,
+        flashcards: 0,
+        mindMaps: 0,
+        examSessions: 0,
+        focusSessions: 0,
+        achievements: 0,
+      }
+    });
   }
 }

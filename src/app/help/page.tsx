@@ -6,37 +6,107 @@ import { Navbar } from '@/components';
 export default function HelpPage() {
   const [activeTab, setActiveTab] = useState('faq');
   const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const faqs = [
+    // General FAQs
     {
       id: 1,
       question: "How do I get started with PAATA.AI?",
-      answer: "Getting started is easy! Simply sign up for an account, choose your learning preferences, and start asking questions. Our AI will adapt to your learning style and provide personalized responses."
+      answer: "Getting started is easy! Simply sign up for an account, choose your learning preferences, and start asking questions. Our AI will adapt to your learning style and provide personalized responses.",
+      category: "general"
     },
     {
       id: 2,
       question: "What types of questions can I ask?",
-      answer: "You can ask any academic question across subjects like Mathematics, Science, History, Literature, and more. Our AI can help with homework, explain concepts, solve problems, and provide step-by-step solutions."
+      answer: "You can ask any academic question across subjects like Mathematics, Science, History, Literature, and more. Our AI can help with homework, explain concepts, solve problems, and provide step-by-step solutions.",
+      category: "general"
     },
     {
       id: 3,
       question: "How accurate are the AI responses?",
-      answer: "Our AI is trained on vast educational content and provides highly accurate responses. However, we always recommend verifying important information and using our responses as a learning aid rather than a final answer."
+      answer: "Our AI is trained on vast educational content and provides highly accurate responses. However, we always recommend verifying important information and using our responses as a learning aid rather than a final answer.",
+      category: "general"
     },
     {
       id: 4,
       question: "Can I upload images for analysis?",
-      answer: "Yes! You can upload images of problems, diagrams, or text, and our AI will analyze them using OCR technology to extract text and provide relevant answers."
+      answer: "Yes! You can upload images of problems, diagrams, or text, and our AI will analyze them using OCR technology to extract text and provide relevant answers.",
+      category: "general"
     },
     {
       id: 5,
       question: "Is my data secure and private?",
-      answer: "Absolutely. We take privacy seriously and use industry-standard encryption to protect your data. Your conversations and personal information are never shared with third parties."
+      answer: "Absolutely. We take privacy seriously and use industry-standard encryption to protect your data. Your conversations and personal information are never shared with third parties.",
+      category: "general"
     },
     {
       id: 6,
+      question: "What if I need help or have technical issues?",
+      answer: "Our dedicated support team is here to assist you. Reach out via email (support@paata.ai), phone (+91 9900361943), or WhatsApp, and we'll get back to you promptly.",
+      category: "general"
+    },
+    // Pricing FAQs
+    {
+      id: 7,
       question: "How do I change my subscription plan?",
-      answer: "You can upgrade or downgrade your plan anytime from your profile settings. Changes take effect immediately, and you'll be charged or credited accordingly."
+      answer: "You can upgrade or downgrade your plan anytime from your profile settings. Changes take effect immediately, and you'll be charged or credited accordingly.",
+      category: "pricing"
+    },
+    {
+      id: 8,
+      question: "Can I change plans anytime?",
+      answer: "Yes! You can upgrade or downgrade your plan at any time. Changes take effect immediately.",
+      category: "pricing"
+    },
+    {
+      id: 9,
+      question: "Is there a free trial?",
+      answer: "Yes! You can start with our free plan and upgrade when you need more features.",
+      category: "pricing"
+    },
+    {
+      id: 10,
+      question: "What payment methods do you accept?",
+      answer: "We accept UPI, credit/debit cards, net banking, and digital wallets like Paytm, PhonePe, and Google Pay for Indian customers.",
+      category: "pricing"
+    },
+    {
+      id: 11,
+      question: "Do you offer student discounts?",
+      answer: "Yes! Students with valid .edu email addresses get 50% off all paid plans. Pro plan available for just ₹399/month for students.",
+      category: "pricing"
+    },
+    {
+      id: 12,
+      question: "Can I cancel my subscription anytime?",
+      answer: "Absolutely, you can cancel your subscription at any time with no questions asked. Your subscription will remain active until the end of the current billing cycle.",
+      category: "pricing"
+    },
+    // Contact FAQs
+    {
+      id: 13,
+      question: "How quickly do you respond?",
+      answer: "We typically respond to all inquiries within 24 hours during business days.",
+      category: "contact"
+    },
+    {
+      id: 14,
+      question: "Do you offer phone support?",
+      answer: "Yes! Our phone support is available Monday-Friday, 9AM-6PM.",
+      category: "contact"
+    },
+    {
+      id: 15,
+      question: "Can I schedule a demo?",
+      answer: "Absolutely! Contact us to schedule a personalized demo of PAATA.AI.",
+      category: "contact"
+    },
+    {
+      id: 16,
+      question: "What languages do you support?",
+      answer: "We support 10+ languages including English, Hindi, Kannada, Gujarati, and more.",
+      category: "contact"
     }
   ];
 
@@ -62,10 +132,19 @@ export default function HelpPage() {
     }
   ];
 
-  const filteredFaqs = faqs.filter(faq => 
-    faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    faq.answer.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredFaqs = faqs.filter(faq => {
+    const matchesSearch = faq.question.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      faq.answer.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = !selectedCategory || faq.category === selectedCategory;
+    return matchesSearch && matchesCategory;
+  });
+
+  const categories = ['general', 'pricing', 'contact'];
+  const categoryNames: { [key: string]: string } = {
+    general: 'General',
+    pricing: 'Pricing & Plans',
+    contact: 'Contact & Support'
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -138,6 +217,33 @@ export default function HelpPage() {
           {/* FAQ Tab */}
           {activeTab === 'faq' && (
             <div className="max-w-4xl mx-auto">
+              {/* Category Filter */}
+              <div className="mb-6 flex flex-wrap gap-2 justify-center">
+                <button
+                  onClick={() => setSelectedCategory(null)}
+                  className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                    selectedCategory === null
+                      ? 'bg-blue-600 text-white'
+                      : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  All
+                </button>
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    onClick={() => setSelectedCategory(category)}
+                    className={`px-4 py-2 rounded-lg font-medium transition-colors ${
+                      selectedCategory === category
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
+                    }`}
+                  >
+                    {categoryNames[category]}
+                  </button>
+                ))}
+              </div>
+              
               <div className="space-y-4">
                 {filteredFaqs.map((faq) => (
                   <div key={faq.id} className="bg-white rounded-lg shadow-sm border p-6">
@@ -291,8 +397,8 @@ export default function HelpPage() {
 
                 <div className="bg-white rounded-lg shadow-sm border p-6">
                   <div className="flex items-center mb-4">
-                    <div className="w-10 h-10 bg-purple-100 rounded-lg flex items-center justify-center mr-4">
-                      <svg className="w-6 h-6 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center mr-4">
+                      <svg className="w-6 h-6 text-gray-900" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
                       </svg>
                     </div>
@@ -322,4 +428,3 @@ export default function HelpPage() {
     </div>
   );
 }
-

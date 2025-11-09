@@ -14,6 +14,7 @@ interface VoiceRecorderProps {
   conversationHistory?: any[];
   sessionContext?: string;
   userId?: string;
+  mode?: string;
 }
 
 export default function VoiceRecorder({ 
@@ -25,7 +26,8 @@ export default function VoiceRecorder({
   sessionId = 'default-session',
   conversationHistory = [],
   sessionContext = '',
-  userId
+  userId,
+  mode = 'standard'
 }: VoiceRecorderProps) {
   const [isRecording, setIsRecording] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -79,6 +81,7 @@ export default function VoiceRecorder({
           formData.append('sessionId', sessionId);
           formData.append('conversationHistory', JSON.stringify(conversationHistory));
           formData.append('sessionContext', sessionContext);
+          formData.append('mode', mode);
           if (userId) {
             formData.append('userId', userId);
           }

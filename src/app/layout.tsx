@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import { Roboto } from "next/font/google";
 import { FixedPlugin, Layout } from "@/components";
 import { UserProvider } from "@/contexts/UserContext";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 const roboto = Roboto({
   subsets: ["latin"],
@@ -31,16 +32,128 @@ export default function RootLayout({
           crossOrigin="anonymous"
           referrerPolicy="no-referrer"
         />
+        <script
+          id="MathJax-script"
+          async
+          src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"
+        ></script>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              window.MathJax = {
+                tex: {
+                  inlineMath: [['$', '$'], ['\\(', '\\)']],
+                  displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                  processEscapes: true,
+                  processEnvironments: true,
+                  packages: {
+                    '[+]': ['base', 'ams', 'noerrors', 'noundefined', 'physics', 'mhchem']
+                  },
+                  macros: {
+                    // Physics macros
+                    '\\vec': '\\overrightarrow{#1}',
+                    '\\hat': '\\widehat{#1}',
+                    '\\dot': '\\dot{#1}',
+                    '\\ddot': '\\ddot{#1}',
+                    '\\partial': '\\frac{\\partial}{\\partial #1}',
+                    '\\grad': '\\nabla',
+                    '\\div': '\\nabla \\cdot',
+                    '\\curl': '\\nabla \\times',
+                    '\\laplacian': '\\nabla^2',
+                    '\\unit': '\\,\\text{#1}',
+                    '\\units': '\\,\\text{#1}',
+                    // Chemistry macros
+                    '\\chem': '\\ce{#1}',
+                    '\\molecule': '\\ce{#1}',
+                    '\\ion': '\\ce{#1}',
+                    '\\reaction': '\\ce{#1}',
+                    // Scientific notation
+                    '\\sci': '\\times 10^{#1}',
+                    '\\scientific': '#1 \\times 10^{#2}',
+                    // Units
+                    '\\meter': '\\,\\text{m}',
+                    '\\kilogram': '\\,\\text{kg}',
+                    '\\second': '\\,\\text{s}',
+                    '\\ampere': '\\,\\text{A}',
+                    '\\kelvin': '\\,\\text{K}',
+                    '\\mole': '\\,\\text{mol}',
+                    '\\candela': '\\,\\text{cd}',
+                    '\\newton': '\\,\\text{N}',
+                    '\\joule': '\\,\\text{J}',
+                    '\\watt': '\\,\\text{W}',
+                    '\\pascal': '\\,\\text{Pa}',
+                    '\\volt': '\\,\\text{V}',
+                    '\\ohm': '\\,\\Omega',
+                    '\\farad': '\\,\\text{F}',
+                    '\\henry': '\\,\\text{H}',
+                    '\\tesla': '\\,\\text{T}',
+                    '\\weber': '\\,\\text{Wb}',
+                    '\\coulomb': '\\,\\text{C}',
+                    '\\siemens': '\\,\\text{S}',
+                    '\\hertz': '\\,\\text{Hz}',
+                    '\\becquerel': '\\,\\text{Bq}',
+                    '\\gray': '\\,\\text{Gy}',
+                    '\\sievert': '\\,\\text{Sv}',
+                    '\\katal': '\\,\\text{kat}',
+                    // Common constants
+                    '\\pi': '\\pi',
+                    '\\e': 'e',
+                    '\\i': 'i',
+                    '\\hbar': '\\hbar',
+                    '\\hslash': '\\hbar',
+                    '\\infty': '\\infty',
+                    '\\alpha': '\\alpha',
+                    '\\beta': '\\beta',
+                    '\\gamma': '\\gamma',
+                    '\\delta': '\\delta',
+                    '\\epsilon': '\\varepsilon',
+                    '\\zeta': '\\zeta',
+                    '\\eta': '\\eta',
+                    '\\theta': '\\theta',
+                    '\\iota': '\\iota',
+                    '\\kappa': '\\kappa',
+                    '\\lambda': '\\lambda',
+                    '\\mu': '\\mu',
+                    '\\nu': '\\nu',
+                    '\\xi': '\\xi',
+                    '\\omicron': '\\omicron',
+                    '\\rho': '\\rho',
+                    '\\sigma': '\\sigma',
+                    '\\tau': '\\tau',
+                    '\\upsilon': '\\upsilon',
+                    '\\phi': '\\phi',
+                    '\\chi': '\\chi',
+                    '\\psi': '\\psi',
+                    '\\omega': '\\omega'
+                  }
+                },
+                options: {
+                  skipHtmlTags: ['script', 'noscript', 'style', 'textarea', 'pre'],
+                  ignoreHtmlClass: 'tex2jax_ignore',
+                  processHtmlClass: 'tex2jax_process'
+                },
+                startup: {
+                  ready: function () {
+                    MathJax.startup.defaultReady();
+                    console.log('MathJax is ready for scientific expressions!');
+                  }
+                }
+              };
+            `,
+          }}
+        />
         <link rel="icon" href="/image/Paata_logo.png" type="image/png" />
         <link rel="shortcut icon" href="/image/Paata_logo.png" type="image/png" />
       </head>
       <body className={roboto.className}>
-        <UserProvider>
-          <Layout>
-            {children}
-            <FixedPlugin />
-          </Layout>
-        </UserProvider>
+        <ErrorBoundary>
+          <UserProvider>
+            <Layout>
+              {children}
+              <FixedPlugin />
+            </Layout>
+          </UserProvider>
+        </ErrorBoundary>
       </body>
     </html>
   );

@@ -1,13 +1,50 @@
 "use client";
 
-import React, { useState } from 'react';
-import { ProfileSidebar } from '@/components';
+import React, { useState, useEffect } from 'react';
 import { Navbar } from '@/components';
 import { useUser } from '@/contexts/UserContext';
+import { TableSkeleton } from '@/components/loading-skeleton';
+
+interface Subscription {
+  id: string;
+  plan: string;
+  status: string;
+  currentPeriodStart: string;
+  currentPeriodEnd: string;
+  cancelAtPeriodEnd: boolean;
+}
+
+interface PaymentMethod {
+  id: string;
+  type: string;
+  last4: string | null;
+  brand: string | null;
+  expiryMonth: number | null;
+  expiryYear: number | null;
+  isDefault: boolean;
+}
+
+interface Invoice {
+  id: string;
+  invoiceId: string;
+  amount: number;
+  currency: string;
+  status: string;
+  paidAt: string | null;
+  dueDate: string;
+  pdfUrl: string | null;
+  plan: string | null;
+}
 
 export default function BillingPage() {
   const { user: contextUser, updateUser } = useUser();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [subscription, setSubscription] = useState<Subscription | null>(null);
+  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | null>(null);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [paymentLink, setPaymentLink] = useState<string | null>(null);
 
   const user = {
     name: `${contextUser?.firstName || ''} ${contextUser?.lastName || ''}`.trim() || 'User',
@@ -16,9 +53,67 @@ export default function BillingPage() {
     plan: contextUser?.plan || 'Basic',
   };
 
-  // Get current plan details based on user's actual plan
+  // Fetch subscription data on mount
+  useEffect(() => {
+    fetchSubscriptionData();
+    fetchInvoices();
+  }, []);
+
+  // Check for payment success in URL
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('payment') === 'success') {
+      alert('Payment successful! Your subscription has been activated.');
+      fetchSubscriptionData();
+      // Remove query param
+      window.history.replaceState({}, '', window.location.pathname);
+    }
+  }, []);
+
+  const fetchSubscriptionData = async () => {
+    try {
+      setIsLoading(true);
+      const response = await fetch('/api/subscriptions/current', {
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setSubscription(data.subscription);
+        setPaymentMethod(data.paymentMethod);
+        
+        // Update user context if subscription data is different
+        if (data.userPlan && data.userPlan !== contextUser?.plan) {
+          await updateUser({ plan: data.userPlan });
+        }
+      } else {
+        console.error('Failed to fetch subscription data');
+      }
+    } catch (error) {
+      console.error('Error fetching subscription data:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchInvoices = async () => {
+    try {
+      const response = await fetch('/api/subscriptions/invoices', {
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setInvoices(data.invoices || []);
+      }
+    } catch (error) {
+      console.error('Error fetching invoices:', error);
+    }
+  };
+
+  // Get current plan details
   const getCurrentPlanDetails = () => {
-    const plan = contextUser?.plan || 'Basic';
+    const plan = subscription?.plan || contextUser?.plan || 'Basic';
     
     switch (plan) {
       case 'Enterprise':
@@ -34,8 +129,6 @@ export default function BillingPage() {
             'Custom integrations',
             'Dedicated support'
           ],
-          nextBilling: 'March 15, 2024',
-          status: 'active'
         };
       case 'Pro':
         return {
@@ -50,8 +143,6 @@ export default function BillingPage() {
             'Export conversations',
             'Custom learning paths'
           ],
-          nextBilling: 'March 15, 2024',
-          status: 'active'
         };
       default: // Basic
         return {
@@ -65,13 +156,29 @@ export default function BillingPage() {
             'Email support',
             'Standard response time'
           ],
-          nextBilling: 'N/A',
-          status: 'active'
         };
     }
   };
 
   const currentPlan = getCurrentPlanDetails();
+
+  // Format next billing date
+  const getNextBillingDate = () => {
+    if (subscription?.currentPeriodEnd) {
+      return new Date(subscription.currentPeriodEnd).toLocaleDateString('en-US', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+      });
+    }
+    return 'N/A';
+  };
+
+  // Get subscription status
+  const getSubscriptionStatus = () => {
+    if (!subscription) return 'Inactive';
+    return subscription.status;
+  };
 
   // Get all available plans
   const availablePlans = [
@@ -87,7 +194,7 @@ export default function BillingPage() {
         'Email support',
         'Standard response time'
       ],
-      isCurrent: user.plan === 'Basic',
+      isCurrent: (subscription?.plan || contextUser?.plan || 'Basic') === 'Basic',
       isPopular: false
     },
     {
@@ -103,7 +210,7 @@ export default function BillingPage() {
         'Export conversations',
         'Custom learning paths'
       ],
-      isCurrent: user.plan === 'Pro',
+      isCurrent: (subscription?.plan || contextUser?.plan || 'Basic') === 'Pro',
       isPopular: true
     },
     {
@@ -119,94 +226,240 @@ export default function BillingPage() {
         'Custom integrations',
         'Dedicated support'
       ],
-      isCurrent: user.plan === 'Enterprise',
+      isCurrent: (subscription?.plan || contextUser?.plan || 'Basic') === 'Enterprise',
       isPopular: false
     }
   ];
 
-  // Get billing history based on user's plan
-  const getBillingHistory = () => {
-    const plan = contextUser?.plan || 'Basic';
-    const planPrice = plan === 'Pro' ? '₹99' : plan === 'Enterprise' ? '₹299' : '₹0';
-    const planName = plan === 'Basic' ? 'Free' : plan;
+  const handlePlanChange = async (newPlan: string) => {
+    if (newPlan === (subscription?.plan || contextUser?.plan || 'Basic')) return;
     
-    if (plan === 'Basic') {
-      return [
-        {
-          id: 'inv_001',
-          date: contextUser?.joinDate || 'January 2024',
-          amount: '₹0',
-          status: 'active',
-          description: 'Basic Plan - Free'
+    setIsProcessing(true);
+    setError(null);
+    setPaymentLink(null);
+
+    try {
+      // For free plan (Basic), create directly
+      if (newPlan === 'Basic') {
+        const response = await fetch('/api/subscriptions/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({
+            plan: newPlan,
+            provider: 'manual',
+          }),
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          alert(`Plan changed to ${newPlan} successfully!`);
+          await fetchSubscriptionData();
+          await updateUser({ plan: newPlan });
+        } else {
+          const error = await response.json();
+          setError(error.message || 'Failed to change plan');
         }
-      ];
-    }
-    
-    // Generate realistic billing history for paid plans
-    const history = [];
-    const currentDate = new Date();
-    
-    for (let i = 0; i < 6; i++) {
-      const invoiceDate = new Date(currentDate);
-      invoiceDate.setMonth(invoiceDate.getMonth() - i);
-      
-      history.push({
-        id: `inv_${String(i + 1).padStart(3, '0')}`,
-        date: invoiceDate.toLocaleDateString('en-US', { 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric' 
+        setIsProcessing(false);
+        return;
+      }
+
+      // For paid plans, use payment link
+      const response = await fetch('/api/subscriptions/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          plan: newPlan,
+          provider: 'razorpay',
+          usePaymentLink: true,
         }),
-        amount: planPrice,
-        status: 'paid',
-        description: `${planName} Plan - Monthly`
       });
+
+      if (response.ok) {
+        const data = await response.json();
+        
+        if (data.paymentLink) {
+          // Open payment link in new window
+          setPaymentLink(data.paymentLink);
+          window.open(data.paymentLink, '_blank');
+          alert(`Payment link opened. Please complete the payment to activate your ${newPlan} plan.`);
+        } else {
+          // Subscription created without payment (for testing)
+          alert(`Plan changed to ${newPlan} successfully!`);
+          await fetchSubscriptionData();
+          await updateUser({ plan: newPlan });
+        }
+      } else {
+        const error = await response.json();
+        setError(error.message || 'Failed to create subscription');
+        alert(error.message || 'Failed to create subscription. Please try again.');
+      }
+    } catch (error: any) {
+      console.error('Plan change error:', error);
+      setError(error.message || 'An error occurred');
+      alert('Failed to change plan. Please try again.');
+    } finally {
+      setIsProcessing(false);
     }
-    
-    return history;
   };
 
-  const billingHistory = getBillingHistory();
+  const handleCancelSubscription = async () => {
+    if (!subscription) return;
 
-  const handlePlanChange = async (newPlan: string) => {
-    if (newPlan === user.plan) return;
-    
+    const confirmCancel = window.confirm(
+      'Are you sure you want to cancel your subscription? You will continue to have access until the end of your billing period.'
+    );
+
+    if (!confirmCancel) return;
+
+    setIsProcessing(true);
     try {
-      const result = await updateUser({ plan: newPlan });
-      if (result.success) {
-        alert(`Plan changed to ${newPlan} successfully!`);
-        // Refresh the page to show updated plan
-        window.location.reload();
+      const response = await fetch('/api/subscriptions/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          subscriptionId: subscription.id,
+          cancelAtPeriodEnd: true,
+        }),
+      });
+
+      if (response.ok) {
+        alert('Subscription will be cancelled at the end of your billing period.');
+        await fetchSubscriptionData();
       } else {
-        alert('Failed to change plan. Please try again.');
+        const error = await response.json();
+        alert(error.message || 'Failed to cancel subscription');
       }
     } catch (error) {
-      alert('Failed to change plan. Please try again.');
+      console.error('Cancel subscription error:', error);
+      alert('Failed to cancel subscription. Please try again.');
+    } finally {
+      setIsProcessing(false);
     }
   };
+
+  const handleUpdatePaymentMethod = async (paymentMethodId: string) => {
+    if (!paymentMethodId) return;
+
+    const confirmUpdate = window.confirm(
+      'Set this payment method as your default payment method?'
+    );
+
+    if (!confirmUpdate) return;
+
+    setIsProcessing(true);
+    try {
+      const response = await fetch('/api/payment-methods', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          paymentMethodId,
+        }),
+      });
+
+      if (response.ok) {
+        alert('Payment method updated successfully.');
+        await fetchSubscriptionData();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to update payment method');
+      }
+    } catch (error) {
+      console.error('Update payment method error:', error);
+      alert('Failed to update payment method. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRemovePaymentMethod = async (paymentMethodId: string) => {
+    if (!paymentMethodId) return;
+
+    const confirmRemove = window.confirm(
+      'Are you sure you want to remove this payment method? This action cannot be undone.'
+    );
+
+    if (!confirmRemove) return;
+
+    setIsProcessing(true);
+    try {
+      const response = await fetch(`/api/payment-methods?id=${paymentMethodId}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+      });
+
+      if (response.ok) {
+        alert('Payment method removed successfully.');
+        await fetchSubscriptionData();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to remove payment method');
+      }
+    } catch (error) {
+      console.error('Remove payment method error:', error);
+      alert('Failed to remove payment method. Please try again.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const formatCurrency = (amount: number, currency: string = 'INR') => {
+    if (currency === 'INR') {
+      return `₹${amount.toFixed(0)}`;
+    }
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency,
+    }).format(amount);
+  };
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 relative">
+        <Navbar />
+        <div className="mt-20 min-h-[calc(100vh-80px)]">
+          <div className="max-w-6xl mx-auto px-4 lg:px-8 py-8">
+              <TableSkeleton rows={3} />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 relative">
       <Navbar />
       
-      <div className="flex flex-col lg:flex-row pt-20">
-        {/* Sidebar */}
-        <div className="relative z-10">
-          <ProfileSidebar
-            isCollapsed={isSidebarCollapsed}
-            onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            user={user}
-          />
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 p-4 lg:p-8 relative z-10">
-          <div className="max-w-6xl mx-auto">
+      <div className="mt-20 min-h-[calc(100vh-80px)]">
+        <div className="max-w-6xl mx-auto px-4 lg:px-8 py-8">
             {/* Header */}
             <div className="mb-8">
               <h1 className="text-3xl font-bold text-gray-900 mb-2">Billing</h1>
               <p className="text-gray-600">Manage your subscription and payment methods</p>
             </div>
+
+            {/* Error Message */}
+            {error && (
+              <div className="bg-red-50 border-l-4 border-red-400 p-4 mb-6">
+                <p className="text-red-700">{error}</p>
+              </div>
+            )}
+
+            {/* Payment Link Message */}
+            {paymentLink && (
+              <div className="bg-blue-50 border-l-4 border-blue-400 p-4 mb-6">
+                <p className="text-blue-700">
+                  Payment link opened. If it didn't open,{' '}
+                  <a href={paymentLink} target="_blank" rel="noopener noreferrer" className="underline">
+                    click here to complete payment
+                  </a>
+                </p>
+              </div>
+            )}
 
             {/* Current Plan Section */}
             <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
@@ -216,12 +469,23 @@ export default function BillingPage() {
                   <p className="text-gray-600">Your active subscription details</p>
                 </div>
                 <div className="flex items-center space-x-2">
-                  <span className="px-3 py-1 bg-green-100 text-green-800 rounded-full text-sm font-medium">
-                    Active
+                  <span className={`px-3 py-1 rounded-full text-sm font-medium ${
+                    getSubscriptionStatus() === 'Active' || getSubscriptionStatus() === 'Trialing'
+                      ? 'bg-green-100 text-green-800'
+                      : getSubscriptionStatus() === 'PastDue'
+                      ? 'bg-yellow-100 text-yellow-800'
+                      : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    {getSubscriptionStatus()}
                   </span>
-                  {currentPlan.nextBilling !== 'N/A' && (
+                  {getNextBillingDate() !== 'N/A' && (
                     <span className="text-sm text-gray-600">
-                      Next billing: {currentPlan.nextBilling}
+                      Next billing: {getNextBillingDate()}
+                    </span>
+                  )}
+                  {subscription?.cancelAtPeriodEnd && (
+                    <span className="px-2 py-1 bg-orange-100 text-orange-800 rounded text-xs font-medium">
+                      Cancelling
                     </span>
                   )}
                 </div>
@@ -246,6 +510,15 @@ export default function BillingPage() {
                       ))}
                     </ul>
                   </div>
+                  {subscription && subscription.status === 'Active' && !subscription.cancelAtPeriodEnd && (
+                    <button
+                      onClick={handleCancelSubscription}
+                      disabled={isProcessing}
+                      className="mt-4 px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50"
+                    >
+                      Cancel Subscription
+                    </button>
+                  )}
                 </div>
                 <div className="text-right">
                   <div className="text-3xl font-bold text-gray-900">{currentPlan.price}</div>
@@ -263,13 +536,13 @@ export default function BillingPage() {
                     key={plan.name}
                     className={`relative rounded-lg border-2 p-6 ${
                       plan.isCurrent
-                        ? 'border-purple-500 bg-purple-50'
+                        ? 'border-gray-900 bg-gray-50'
                         : 'border-gray-200 hover:border-gray-300'
                     }`}
                   >
                     {plan.isPopular && !plan.isCurrent && (
                       <div className="absolute -top-3 left-1/2 transform -translate-x-1/2">
-                        <span className="bg-purple-500 text-white px-3 py-1 rounded-full text-sm font-medium">
+                        <span className="bg-gray-900 text-white px-3 py-1 rounded-full text-sm font-medium">
                           Most Popular
                         </span>
                       </div>
@@ -295,16 +568,22 @@ export default function BillingPage() {
 
                     <button
                       onClick={() => handlePlanChange(plan.name)}
-                      disabled={plan.isCurrent}
+                      disabled={plan.isCurrent || isProcessing}
                       className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
                         plan.isCurrent
                           ? 'bg-gray-100 text-gray-500 cursor-not-allowed'
                           : plan.name === 'Pro' || plan.name === 'Enterprise'
-                          ? 'bg-purple-600 text-white hover:bg-purple-700'
-                          : 'bg-gray-900 text-white hover:bg-gray-800'
+                          ? 'bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50'
+                          : 'bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50'
                       }`}
                     >
-                      {plan.isCurrent ? 'CURRENT PLAN' : plan.name === 'Basic' ? 'DOWNGRADE' : 'UPGRADE PLAN'}
+                      {isProcessing
+                        ? 'Processing...'
+                        : plan.isCurrent
+                        ? 'CURRENT PLAN'
+                        : plan.name === 'Basic'
+                        ? 'DOWNGRADE'
+                        : 'UPGRADE PLAN'}
                     </button>
                   </div>
                 ))}
@@ -314,75 +593,138 @@ export default function BillingPage() {
             {/* Payment Method Section */}
             <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
               <h2 className="text-xl font-semibold text-gray-900 mb-6">Payment Method</h2>
-              <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
-                <div className="flex items-center space-x-4">
-                  <div className="w-12 h-8 bg-blue-600 rounded flex items-center justify-center">
-                    <span className="text-white font-bold text-sm">VISA</span>
+              {paymentMethod ? (
+                <div className="flex items-center justify-between p-4 border border-gray-200 rounded-lg">
+                  <div className="flex items-center space-x-4">
+                    <div className="w-12 h-8 bg-blue-600 rounded flex items-center justify-center">
+                      <span className="text-white font-bold text-sm">{paymentMethod.brand?.toUpperCase() || 'CARD'}</span>
+                    </div>
+                    <div>
+                      <p className="font-medium text-gray-900">
+                        {paymentMethod.type === 'card' ? 'Card' : paymentMethod.type} 
+                        {paymentMethod.last4 ? ` .... ${paymentMethod.last4}` : ''}
+                      </p>
+                      {paymentMethod.expiryMonth && paymentMethod.expiryYear && (
+                        <p className="text-sm text-gray-600">
+                          Expires {String(paymentMethod.expiryMonth).padStart(2, '0')}/{String(paymentMethod.expiryYear).slice(-2)}
+                        </p>
+                      )}
+                    </div>
+                    {paymentMethod.isDefault && (
+                      <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
+                        Default
+                      </span>
+                    )}
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-900">Visa .... 4242</p>
-                    <p className="text-sm text-gray-600">Expires 12/26</p>
+                  <div className="flex space-x-2">
+                    <button 
+                      onClick={() => handleUpdatePaymentMethod(paymentMethod.id)}
+                      disabled={isProcessing || paymentMethod.isDefault}
+                      className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {paymentMethod.isDefault ? 'Default' : 'Set Default'}
+                    </button>
+                    <button 
+                      onClick={() => handleRemovePaymentMethod(paymentMethod.id)}
+                      disabled={isProcessing || paymentMethod.isDefault}
+                      className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Remove
+                    </button>
                   </div>
-                  <span className="px-2 py-1 bg-green-100 text-green-800 rounded text-xs font-medium">
-                    Default
-                  </span>
                 </div>
-                <div className="flex space-x-2">
-                  <button className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors">
-                    Update
-                  </button>
-                  <button className="px-4 py-2 border border-red-300 text-red-700 rounded-lg hover:bg-red-50 transition-colors">
-                    Remove
-                  </button>
+              ) : (
+                <div className="p-4 border border-gray-200 rounded-lg text-center text-gray-600">
+                  <p>No payment method on file</p>
+                  <p className="text-sm mt-2">Add a payment method when upgrading to a paid plan</p>
                 </div>
-              </div>
+              )}
             </div>
 
             {/* Billing History Section */}
             <div className="bg-white rounded-lg shadow-lg p-6">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-xl font-semibold text-gray-900">Billing History</h2>
-                <button className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
-                  Download All
-                </button>
+                {invoices.length > 0 && (
+                  <button className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors">
+                    Download All
+                  </button>
+                )}
               </div>
               
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="border-b border-gray-200">
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Invoice</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Date</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Amount</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Status</th>
-                      <th className="text-left py-3 px-4 font-medium text-gray-900">Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billingHistory.map((invoice) => (
-                      <tr key={invoice.id} className="border-b border-gray-100">
-                        <td className="py-3 px-4 text-sm text-gray-900">{invoice.id}</td>
-                        <td className="py-3 px-4 text-sm text-gray-600">{invoice.date}</td>
-                        <td className="py-3 px-4 text-sm font-medium text-gray-900">{invoice.amount}</td>
-                        <td className="py-3 px-4">
-                          <span className={`px-2 py-1 rounded text-xs font-medium ${
-                            invoice.status === 'paid' 
-                              ? 'bg-green-100 text-green-800' 
-                              : 'bg-yellow-100 text-yellow-800'
-                          }`}>
-                            {invoice.status}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4 text-sm text-gray-600">{invoice.description}</td>
+              {invoices.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full">
+                    <thead>
+                      <tr className="border-b border-gray-200">
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Invoice</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Date</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Amount</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Status</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Plan</th>
+                        <th className="text-left py-3 px-4 font-medium text-gray-900">Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
+                    </thead>
+                    <tbody>
+                      {invoices.map((invoice) => (
+                        <tr key={invoice.id} className="border-b border-gray-100">
+                          <td className="py-3 px-4 text-sm text-gray-900">{invoice.invoiceId}</td>
+                          <td className="py-3 px-4 text-sm text-gray-600">
+                            {invoice.paidAt
+                              ? new Date(invoice.paidAt).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })
+                              : new Date(invoice.dueDate).toLocaleDateString('en-US', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric',
+                                })}
+                          </td>
+                          <td className="py-3 px-4 text-sm font-medium text-gray-900">
+                            {formatCurrency(invoice.amount, invoice.currency)}
+                          </td>
+                          <td className="py-3 px-4">
+                            <span className={`px-2 py-1 rounded text-xs font-medium ${
+                              invoice.status === 'paid' 
+                                ? 'bg-green-100 text-green-800' 
+                                : invoice.status === 'pending'
+                                ? 'bg-yellow-100 text-yellow-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {invoice.status}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-sm text-gray-600">{invoice.plan || 'N/A'}</td>
+                          <td className="py-3 px-4">
+                            {invoice.pdfUrl && (
+                              <a
+                                href={invoice.pdfUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="text-gray-900 hover:text-gray-800 text-sm"
+                              >
+                                Download
+                              </a>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="text-center py-8 text-gray-600">
+                  <p>No billing history yet</p>
+                  <p className="text-sm mt-2">Your invoices will appear here once you subscribe to a paid plan</p>
+                </div>
+              )}
           </div>
         </div>
       </div>
     </div>
   );
 }
+
+

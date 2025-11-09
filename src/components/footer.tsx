@@ -1,9 +1,9 @@
 "use client";
 import Image from "next/image";
+import Link from "next/link";
 import { Typography, IconButton, Button } from "@material-tailwind/react";
 import { useComingSoonModal } from "@/components/coming-soon-modal";
 
-const LINKS = [];
 const CURRENT_YEAR = new Date().getFullYear();
 
 export function Footer() {
@@ -11,42 +11,106 @@ export function Footer() {
   return (
     <footer className="mt-10 bg-gray-900 px-4 sm:px-8 pt-8 sm:pt-12">
       <div className="container mx-auto">
-        <div className="flex flex-wrap justify-center gap-6 sm:gap-8 md:justify-between">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-8 mb-8">
+          {/* Company Info */}
           <div className="text-center md:text-left">
+            <Link href="/">
             <Typography
-              as="a"
-              href="#!"
               variant="h5"
               color="white"
-              className="mb-3 sm:mb-4 text-lg sm:text-xl"
+                className="mb-3 sm:mb-4 text-lg sm:text-xl hover:opacity-80 transition-opacity cursor-pointer"
             >
               PAATA.AI
             </Typography>
-            <Typography color="white" className="mb-8 sm:mb-12 font-normal text-sm sm:text-base">
+            </Link>
+            <Typography color="white" className="mb-4 font-normal text-sm sm:text-base opacity-90">
             From doubt to done — with Paata.ai.
             </Typography>
-            <ul className="flex flex-wrap items-center justify-center md:justify-start">
-              {LINKS.map((link, idx) => (
-                <li key={link}>
-                  <Typography
-                    as="a"
-                    href="#!"
-                    color="white"
-                    className={`py-1 font-medium transition-colors ${
-                      idx === 0 ? "pr-3" : "px-3"
-                    }`}
-                  >
-                    {link}
-                  </Typography>
-                </li>
-              ))}
+          </div>
+
+          {/* Main Navigation */}
+          <div className="text-center md:text-left">
+            <Typography variant="h6" color="white" className="mb-4 text-base sm:text-lg font-semibold">
+              Navigation
+            </Typography>
+            <ul className="space-y-2">
+              <li>
+                <Link href="/" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Home
+                </Link>
+              </li>
+              <li>
+                <Link href="/about" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  About Us
+                </Link>
+              </li>
+              <li>
+                <Link href="/pricing" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Pricing
+                </Link>
+              </li>
+              <li>
+                <Link href="/learning" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Learning Materials
+                </Link>
+              </li>
             </ul>
           </div>
-          <div className="mt-6 sm:mt-8 w-full md:mt-0 md:w-auto">
-            <Typography variant="h6" color="white" className="mb-3 text-base sm:text-lg">
+
+          {/* Support & Help */}
+          <div className="text-center md:text-left">
+            <Typography variant="h6" color="white" className="mb-4 text-base sm:text-lg font-semibold">
+              Support
+            </Typography>
+            <ul className="space-y-2">
+              <li>
+                <Link href="/help" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Help & Support
+                </Link>
+              </li>
+              <li>
+                <Link href="/auth/login" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Sign In
+                </Link>
+              </li>
+              <li>
+                <Link href="/auth/signup" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Sign Up
+                </Link>
+              </li>
+            </ul>
+          </div>
+
+          {/* Legal */}
+          <div className="text-center md:text-left">
+            <Typography variant="h6" color="white" className="mb-4 text-base sm:text-lg font-semibold">
+              Legal
+                  </Typography>
+            <ul className="space-y-2">
+              <li>
+                <Link href="/legal/terms" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Terms of Service
+                </Link>
+              </li>
+              <li>
+                <Link href="/legal/privacy" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Privacy Policy
+                </Link>
+              </li>
+              <li>
+                <Link href="/legal/refund" className="text-white text-sm hover:text-gray-300 transition-colors opacity-90 hover:opacity-100">
+                  Refund Policy
+                </Link>
+                </li>
+            </ul>
+          </div>
+
+          {/* App Download */}
+          <div className="text-center md:text-left">
+            <Typography variant="h6" color="white" className="mb-3 text-base sm:text-lg font-semibold">
               Get the app
             </Typography>
-            <div className="flex flex-col gap-2 max-w-xs mx-auto md:mx-0">
+            <div className="flex flex-col gap-2">
               <Button
                 color="white"
                 className="flex items-center justify-center text-xs sm:text-sm py-2 sm:py-3"

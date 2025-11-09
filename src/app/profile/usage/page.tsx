@@ -12,13 +12,12 @@ import {
   CalendarIcon,
   ArrowDownTrayIcon
 } from '@heroicons/react/24/outline';
-import ProfileSidebar from '@/components/profile-sidebar';
 import { Navbar } from '@/components';
 import { useUser } from '@/contexts/UserContext';
+import LoadingSkeleton, { CardGridSkeleton } from '@/components/loading-skeleton';
 
 export default function UsagePage() {
   const { user: contextUser } = useUser();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [selectedPeriod, setSelectedPeriod] = useState('30d');
   const [usageData, setUsageData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -104,7 +103,7 @@ export default function UsagePage() {
   const subjectBreakdown = usageData?.subjectBreakdown || [
     { subject: 'Mathematics', interactions: 0, percentage: 0, color: 'bg-blue-500' },
     { subject: 'Science', interactions: 0, percentage: 0, color: 'bg-green-500' },
-    { subject: 'English', interactions: 0, percentage: 0, color: 'bg-purple-500' },
+    { subject: 'English', interactions: 0, percentage: 0, color: 'bg-gray-900' },
     { subject: 'History', interactions: 0, percentage: 0, color: 'bg-orange-500' },
     { subject: 'Other', interactions: 0, percentage: 0, color: 'bg-gray-500' }
   ];
@@ -118,7 +117,7 @@ export default function UsagePage() {
       case 'image':
         return <PhotoIcon className="w-5 h-5 text-green-500" />;
       case 'voice':
-        return <MicrophoneIcon className="w-5 h-5 text-purple-500" />;
+        return <MicrophoneIcon className="w-5 h-5 text-gray-900" />;
       default:
         return <ChatBubbleLeftRightIcon className="w-5 h-5 text-gray-500" />;
     }
@@ -128,39 +127,28 @@ export default function UsagePage() {
     <div className="min-h-screen bg-gray-50 relative">
       <Navbar />
       
-      <div className="flex flex-col lg:flex-row pt-20">
-        {/* Sidebar */}
-        <div className="relative z-10">
-          <ProfileSidebar
-            isCollapsed={isSidebarCollapsed}
-            onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-            user={user}
-          />
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 p-4 lg:p-8 relative z-10">
-          <div className="max-w-6xl mx-auto">
+      <div className="mt-20 min-h-[calc(100vh-80px)]">
+        <div className="max-w-6xl mx-auto px-4 lg:px-8 py-8">
             {/* Header */}
             <div className="mb-8">
               <div className="flex items-center justify-between">
                 <div>
                   <Typography variant="h3" color="blue-gray" className="font-bold mb-2">
-                    Usage Statistics
+                    Learning Progress
                   </Typography>
                   <Typography variant="paragraph" color="gray">
-                    Track your learning progress and AI interactions
+                    Track your learning journey and achievements
                   </Typography>
                 </div>
                 <div className="flex items-center space-x-3">
                   <Button variant="outlined" size="sm" className="flex items-center gap-2">
-                    <ArrowDownTrayIcon className="w-4 h-4" />
-                    Export Data
+                    <ArrowTrendingUpIcon className="w-4 h-4" />
+                    View Analytics
                   </Button>
                   <select
                     value={selectedPeriod}
                     onChange={(e) => setSelectedPeriod(e.target.value)}
-                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500"
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-gray-900"
                   >
                     <option value="7d">Last 7 days</option>
                     <option value="30d">Last 30 days</option>
@@ -175,7 +163,7 @@ export default function UsagePage() {
             {loading && (
               <div className="flex items-center justify-center py-12">
                 <div className="text-center">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900 mx-auto mb-4"></div>
                   <Typography variant="paragraph" color="gray">
                     Loading usage data...
                   </Typography>
@@ -215,7 +203,7 @@ export default function UsagePage() {
                     {usageStats.totalInteractions.toLocaleString()}
                   </Typography>
                   <Typography variant="small" color="gray">
-                    Total Interactions
+                    Questions Answered
                   </Typography>
                 </CardBody>
               </Card>
@@ -229,21 +217,21 @@ export default function UsagePage() {
                     {usageStats.totalTimeSpent}
                   </Typography>
                   <Typography variant="small" color="gray">
-                    Time Spent Learning
+                    Total Study Time
                   </Typography>
                 </CardBody>
               </Card>
 
               <Card className="shadow-lg">
                 <CardBody className="p-6 text-center">
-                  <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <ArrowTrendingUpIcon className="w-6 h-6 text-purple-600" />
+                  <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <CalendarIcon className="w-6 h-6 text-gray-900" />
                   </div>
                   <Typography variant="h3" color="blue-gray" className="font-bold mb-2">
                     {usageStats.streakDays}
                   </Typography>
                   <Typography variant="small" color="gray">
-                    Day Streak
+                    Day Learning Streak
                   </Typography>
                 </CardBody>
               </Card>
@@ -251,13 +239,13 @@ export default function UsagePage() {
               <Card className="shadow-lg">
                 <CardBody className="p-6 text-center">
                   <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <CalendarIcon className="w-6 h-6 text-orange-600" />
+                    <ChartBarIcon className="w-6 h-6 text-orange-600" />
                   </div>
                   <Typography variant="h3" color="blue-gray" className="font-bold mb-2">
                     {usageStats.averageSessionTime}
                   </Typography>
                   <Typography variant="small" color="gray">
-                    Avg Session Time
+                    Average Study Session
                   </Typography>
                 </CardBody>
               </Card>
@@ -267,7 +255,7 @@ export default function UsagePage() {
             <Card className="mb-8 shadow-lg">
               <CardHeader className="bg-gray-50 px-6 py-4">
                 <Typography variant="h6" color="blue-gray" className="font-semibold">
-                  Weekly Activity
+                  Weekly Learning Activity
                 </Typography>
               </CardHeader>
               <CardBody className="p-6">
@@ -281,7 +269,7 @@ export default function UsagePage() {
                         <div className="flex items-center space-x-2 mb-1">
                           <div className="flex-1 bg-gray-200 rounded-full h-2">
                             <div
-                              className="bg-purple-500 h-2 rounded-full"
+                              className="bg-gray-900 h-2 rounded-full"
                               style={{ width: `${(day.interactions / 70) * 100}%` }}
                             ></div>
                           </div>
@@ -304,7 +292,7 @@ export default function UsagePage() {
               <Card className="shadow-lg">
                 <CardHeader className="bg-gray-50 px-6 py-4">
                   <Typography variant="h6" color="blue-gray" className="font-semibold">
-                    Subject Breakdown
+                    Topics Studied
                   </Typography>
                 </CardHeader>
                 <CardBody className="p-6">
@@ -319,7 +307,7 @@ export default function UsagePage() {
                         </div>
                         <div className="flex items-center space-x-3">
                           <Typography variant="small" color="gray">
-                            {subject.interactions} interactions
+                            {subject.interactions} questions
                           </Typography>
                           <Typography variant="small" color="blue-gray" className="font-medium">
                             {subject.percentage}%
@@ -335,7 +323,7 @@ export default function UsagePage() {
               <Card className="shadow-lg">
                 <CardHeader className="bg-gray-50 px-6 py-4">
                   <Typography variant="h6" color="blue-gray" className="font-semibold">
-                    This Month
+                    This Month's Progress
                   </Typography>
                 </CardHeader>
                 <CardBody className="p-6">
@@ -344,7 +332,7 @@ export default function UsagePage() {
                       <div className="flex items-center space-x-3">
                         <ChatBubbleLeftRightIcon className="w-5 h-5 text-blue-500" />
                         <Typography variant="small" color="blue-gray">
-                          Text Messages
+                          Questions Asked
                         </Typography>
                       </div>
                       <Typography variant="small" color="blue-gray" className="font-medium">
@@ -356,7 +344,7 @@ export default function UsagePage() {
                       <div className="flex items-center space-x-3">
                         <PhotoIcon className="w-5 h-5 text-green-500" />
                         <Typography variant="small" color="blue-gray">
-                          Image Uploads
+                          Images Analyzed
                         </Typography>
                       </div>
                       <Typography variant="small" color="blue-gray" className="font-medium">
@@ -366,9 +354,9 @@ export default function UsagePage() {
 
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-3">
-                        <MicrophoneIcon className="w-5 h-5 text-purple-500" />
+                        <MicrophoneIcon className="w-5 h-5 text-gray-900" />
                         <Typography variant="small" color="blue-gray">
-                          Voice Inputs
+                          Voice Queries
                         </Typography>
                       </div>
                       <Typography variant="small" color="blue-gray" className="font-medium">
@@ -380,7 +368,7 @@ export default function UsagePage() {
                       <div className="flex items-center space-x-3">
                         <ClockIcon className="w-5 h-5 text-orange-500" />
                         <Typography variant="small" color="blue-gray">
-                          Time Spent
+                          Study Time
                         </Typography>
                       </div>
                       <Typography variant="small" color="blue-gray" className="font-medium">
@@ -396,7 +384,7 @@ export default function UsagePage() {
             <Card className="mt-8 shadow-lg">
               <CardHeader className="bg-gray-50 px-6 py-4">
                 <Typography variant="h6" color="blue-gray" className="font-semibold">
-                  Recent Activity
+                  Recent Learning Activity
                 </Typography>
               </CardHeader>
               <CardBody className="p-0">
@@ -415,7 +403,7 @@ export default function UsagePage() {
                             <Chip
                               value={activity.type}
                               size="sm"
-                              color="purple"
+                              color="gray"
                               className="text-xs"
                             />
                           </div>
@@ -434,7 +422,6 @@ export default function UsagePage() {
                 </div>
               </CardBody>
             </Card>
-          </div>
         </div>
       </div>
     </div>

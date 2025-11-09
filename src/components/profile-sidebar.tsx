@@ -1,18 +1,15 @@
 "use client";
 
-import { useState } from 'react';
-import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import {
   UserIcon,
   CreditCardIcon,
-  Cog6ToothIcon,
   ChartBarIcon,
   ShieldCheckIcon,
-  ArrowRightOnRectangleIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-} from '@heroicons/react/24/outline';
+} from "@heroicons/react/24/outline";
 
 interface ProfileSidebarProps {
   isCollapsed: boolean;
@@ -25,140 +22,99 @@ interface ProfileSidebarProps {
   };
 }
 
-export default function ProfileSidebar({ isCollapsed, onToggle, user }: ProfileSidebarProps) {
+export default function ProfileSidebar({
+  isCollapsed,
+  onToggle,
+  user,
+}: ProfileSidebarProps) {
   const pathname = usePathname();
 
   const navigationItems = [
-    {
-      name: 'Profile',
-      href: '/profile',
-      icon: UserIcon,
-      description: 'Personal information'
-    },
-    {
-      name: 'Billing',
-      href: '/profile/billing',
-      icon: CreditCardIcon,
-      description: 'Subscription & payments'
-    },
-    {
-      name: 'Usage',
-      href: '/profile/usage',
-      icon: ChartBarIcon,
-      description: 'Usage statistics'
-    },
-    {
-      name: 'Settings',
-      href: '/profile/settings',
-      icon: Cog6ToothIcon,
-      description: 'Preferences & privacy'
-    },
-    {
-      name: 'Security',
-      href: '/profile/security',
-      icon: ShieldCheckIcon,
-      description: 'Password & security'
-    },
+    { name: "Profile", href: "/profile", icon: UserIcon },
+    { name: "Billing", href: "/profile/billing", icon: CreditCardIcon },
+    { name: "Usage", href: "/profile/usage", icon: ChartBarIcon },
+    { name: "Security", href: "/profile/security", icon: ShieldCheckIcon },
   ];
 
-  const isActive = (href: string) => {
-    if (href === '/profile') {
-      return pathname === '/profile';
-    }
-    return pathname.startsWith(href);
-  };
+  const isActive = (href: string) =>
+    href === "/profile" ? pathname === "/profile" : pathname.startsWith(href);
 
   return (
-    <div className={`bg-white border-r border-gray-200 transition-all duration-300 relative z-20 ${
-      isCollapsed ? 'w-16' : 'w-64'
-    } hidden lg:block`}>
+    <aside
+      className={`bg-white shadow-lg border-r border-gray-200 flex flex-col flex-shrink-0 transition-all duration-300 overflow-hidden hidden lg:flex
+        ${isCollapsed ? "w-16" : "w-72"}`}
+      style={{
+        height: "calc(100vh - 80px)", // keeps it below navbar
+        position: "relative",
+        zIndex: 10,
+      }}
+    >
       {/* Header */}
-      <div className="p-4 border-b border-gray-200">
-        <div className="flex items-center justify-between">
-          {!isCollapsed && (
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 bg-[#612A74] rounded-lg flex items-center justify-center">
+      <header className="px-4 py-4 border-b border-gray-200 flex-shrink-0 bg-gradient-to-r from-gray-900 to-gray-800">
+        <div className="flex items-center justify-between gap-2 w-full">
+          {!isCollapsed ? (
+            <>
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 backdrop-blur-sm">
+                  <span className="text-white font-bold text-sm">P</span>
+                </div>
+                <h1 className="text-xl font-semibold text-white truncate">
+                  PAATA.AI
+                </h1>
+              </div>
+              <button
+                onClick={onToggle}
+                className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                aria-label="Collapse sidebar"
+                type="button"
+              >
+                <ChevronLeftIcon className="w-5 h-5 text-white" />
+              </button>
+            </>
+          ) : (
+            <div className="flex flex-col items-center gap-2 w-full">
+              <div className="w-8 h-8 bg-white/20 rounded-lg flex items-center justify-center flex-shrink-0 backdrop-blur-sm">
                 <span className="text-white font-bold text-sm">P</span>
               </div>
-              <h1 className="text-xl font-semibold text-gray-900">
-                PAATA.AI
-              </h1>
+              <button
+                onClick={onToggle}
+                className="p-1.5 hover:bg-white/20 rounded-lg transition-colors"
+                aria-label="Expand sidebar"
+                type="button"
+              >
+                <ChevronRightIcon className="w-5 h-5 text-white" />
+              </button>
             </div>
           )}
-          <button
-            onClick={onToggle}
-            className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-          >
-            {isCollapsed ? (
-              <ChevronRightIcon className="w-5 h-5 text-gray-600" />
-            ) : (
-              <ChevronLeftIcon className="w-5 h-5 text-gray-600" />
-            )}
-          </button>
         </div>
-      </div>
-
-      {/* User Info */}
-      {!isCollapsed && (
-        <div className="p-4 border-b border-gray-200">
-          <div className="flex items-center space-x-3">
-            <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
-              {user.avatar && user.avatar.trim() !== "" ? (
-                <img
-                  src={user.avatar}
-                  alt={user.name}
-                  className="w-12 h-12 rounded-full object-cover"
-                />
-              ) : (
-                <span className="text-lg font-semibold text-gray-600">
-                  {user.name.charAt(0)}
-                </span>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <h3 className="text-sm font-medium text-gray-900 truncate">
-                {user.name}
-              </h3>
-              <p className="text-xs text-gray-500 truncate">
-                {user.email}
-              </p>
-              <span className={`inline-block px-2 py-1 text-xs font-medium rounded-full mt-1 ${
-                user.plan === 'Enterprise' 
-                  ? 'bg-purple-100 text-purple-800'
-                  : user.plan === 'Pro'
-                  ? 'bg-blue-100 text-blue-800'
-                  : 'bg-gray-100 text-gray-800'
-              }`}>
-                {user.plan}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
+      </header>
 
       {/* Navigation */}
-      <nav className="p-4">
-        <ul className="space-y-2">
+      <nav className="flex-1 overflow-y-auto overflow-x-hidden bg-white w-full">
+        <ul className="py-4 px-3 space-y-2 w-full">
           {navigationItems.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
-            
+
             return (
-              <li key={item.name}>
+              <li key={item.name} className="w-full">
                 <Link
                   href={item.href}
-                  className={`flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors ${
+                  className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 w-full ${
                     active
-                      ? 'bg-purple-100 text-purple-700'
-                      : 'text-gray-700 hover:bg-gray-100'
+                      ? "bg-gray-100 text-gray-900 font-semibold shadow-sm"
+                      : "text-gray-700 hover:bg-gray-50 hover:text-gray-900"
                   }`}
                 >
-                  <Icon className={`w-5 h-5 ${active ? 'text-purple-700' : 'text-gray-500'}`} />
+                  <Icon
+                    className={`w-5 h-5 flex-shrink-0 ${
+                      active ? "text-gray-900" : "text-gray-600"
+                    }`}
+                  />
                   {!isCollapsed && (
-                    <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium">{item.name}</div>
-                      <div className="text-xs text-gray-500">{item.description}</div>
-                    </div>
+                    <span className="text-sm font-medium truncate">
+                      {item.name}
+                    </span>
                   )}
                 </Link>
               </li>
@@ -166,16 +122,6 @@ export default function ProfileSidebar({ isCollapsed, onToggle, user }: ProfileS
           })}
         </ul>
       </nav>
-
-      {/* Sign Out */}
-      <div className="p-4 border-t border-gray-200 mt-auto">
-        <button className="flex items-center space-x-3 px-3 py-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors w-full">
-          <ArrowRightOnRectangleIcon className="w-5 h-5" />
-          {!isCollapsed && (
-            <span className="text-sm font-medium">Sign Out</span>
-          )}
-        </button>
-      </div>
-    </div>
+    </aside>
   );
 }

@@ -2,14 +2,12 @@
 
 import React, { useState } from 'react';
 import { PencilIcon, CheckIcon, XMarkIcon, CameraIcon } from '@heroicons/react/24/outline';
-import ProfileSidebar from '@/components/profile-sidebar';
 import { Navbar } from '@/components';
 import { useUser } from '@/contexts/UserContext';
 import ImageUpload from '@/components/image-upload';
 
 export default function ProfilePage() {
   const { user, updateUser } = useUser();
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   
   // Initialize form data with user data or defaults
@@ -22,6 +20,8 @@ export default function ProfilePage() {
     location: user?.location || '',
     website: user?.website || '',
     joinDate: user?.joinDate || '',
+    class: user?.preferences?.learning?.class || '1',
+    board: user?.preferences?.learning?.board || 'CBSE',
   });
 
   // Update form data when user data changes
@@ -36,6 +36,8 @@ export default function ProfilePage() {
         location: user.location || '',
         website: user.website || '',
         joinDate: user.joinDate || '',
+        class: user.preferences?.learning?.class || '1',
+        board: user.preferences?.learning?.board || 'CBSE',
       });
     }
   }, [user]);
@@ -47,7 +49,7 @@ export default function ProfilePage() {
     plan: user?.plan || 'Basic',
   };
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     setFormData(prev => ({
       ...prev,
       [e.target.name]: e.target.value
@@ -65,6 +67,14 @@ export default function ProfilePage() {
         bio: formData.bio,
         location: formData.location,
         website: formData.website,
+        preferences: {
+          ...user.preferences,
+          learning: {
+            ...user.preferences?.learning,
+            class: formData.class,
+            board: formData.board,
+          },
+        },
       });
       
       if (result.success) {
@@ -90,19 +100,8 @@ export default function ProfilePage() {
     <div className="min-h-screen bg-gray-50 relative">
       <Navbar />
       
-      <div className="flex flex-col lg:flex-row pt-20">
-        {/* Sidebar */}
-        <div className="relative z-10">
-        <ProfileSidebar
-          isCollapsed={isSidebarCollapsed}
-          onToggle={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
-          user={userDisplay}
-        />
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 p-4 lg:p-8 relative z-10">
-          <div className="max-w-4xl mx-auto">
+      <div className="mt-20 min-h-[calc(100vh-80px)]">
+        <div className="max-w-4xl mx-auto px-4 lg:px-8 py-8">
             {/* Header */}
             <div className="mb-8">
               <h1 className="text-3xl font-bold text-gray-900 mb-2">
@@ -139,7 +138,7 @@ export default function ProfilePage() {
                       </h2>
                       <span className={`px-3 py-1 rounded-full text-sm font-semibold ${
                         userDisplay.plan === 'Enterprise' 
-                          ? 'bg-purple-100 text-purple-800'
+                          ? 'bg-gray-100 text-gray-900'
                           : userDisplay.plan === 'Pro'
                           ? 'bg-blue-100 text-blue-800'
                           : 'bg-gray-100 text-gray-800'
@@ -164,7 +163,7 @@ export default function ProfilePage() {
                     {!isEditing ? (
                       <button
                         onClick={() => setIsEditing(true)}
-                        className="flex items-center space-x-2 px-4 py-2 bg-[#612A74] text-white rounded-lg hover:bg-[#4a1f5c] transition-colors"
+                        className="flex items-center space-x-2 px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800 transition-colors"
                       >
                         <PencilIcon className="w-4 h-4" />
                         <span>Edit Profile</span>
@@ -211,7 +210,7 @@ export default function ProfilePage() {
                       value={formData.firstName}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   
@@ -226,7 +225,7 @@ export default function ProfilePage() {
                       value={formData.lastName}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   
@@ -241,7 +240,7 @@ export default function ProfilePage() {
                       value={formData.email}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   
@@ -256,7 +255,7 @@ export default function ProfilePage() {
                       value={formData.phone}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   
@@ -271,7 +270,7 @@ export default function ProfilePage() {
                       value={formData.location}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
                   </div>
                   
@@ -286,8 +285,50 @@ export default function ProfilePage() {
                       value={formData.website}
                       onChange={handleInputChange}
                       disabled={!isEditing}
-                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
                     />
+                  </div>
+                  
+                  {/* Class Selection */}
+                  <div>
+                    <label htmlFor="class" className="block text-sm font-medium text-gray-700 mb-2">
+                      Class
+                    </label>
+                    <select
+                      id="class"
+                      name="class"
+                      value={formData.class}
+                      onChange={handleInputChange}
+                      disabled={!isEditing}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].map((cls) => (
+                        <option key={cls} value={cls.toString()}>
+                          Class {cls}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {/* Board Selection */}
+                  <div>
+                    <label htmlFor="board" className="block text-sm font-medium text-gray-700 mb-2">
+                      Board
+                    </label>
+                    <select
+                      id="board"
+                      name="board"
+                      value={formData.board}
+                      onChange={handleInputChange}
+                      disabled={!isEditing}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-gray-900 focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed"
+                    >
+                      <option value="CBSE">CBSE</option>
+                      <option value="ICSE">ICSE</option>
+                      <option value="State Board">State Board</option>
+                      <option value="IGCSE">IGCSE</option>
+                      <option value="IB">IB</option>
+                    </select>
                   </div>
                 </div>
                 
@@ -305,7 +346,6 @@ export default function ProfilePage() {
                     className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#612A74] focus:border-transparent disabled:bg-gray-100 disabled:cursor-not-allowed resize-none"
                     placeholder="Tell us about yourself..."
                   />
-                </div>
               </div>
             </div>
           </div>

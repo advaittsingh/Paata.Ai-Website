@@ -5,9 +5,75 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
 };
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient();
+// Helper to check if Prisma client has Board model
+function hasBoardModel(client: PrismaClient): boolean {
+  try {
+    // Check if board property exists and has Prisma methods (like findMany)
+    const boardModel = (client as any).board;
+    if (!boardModel || typeof boardModel !== 'object') {
+      return false;
+    }
+    // Verify it has Prisma methods (findMany is a key method)
+    return typeof boardModel.findMany === 'function';
+  } catch {
+    return false;
+  }
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma;
+// Create or reuse Prisma client instance
+function createPrismaClient(): PrismaClient {
+  const client = new PrismaClient({
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+  });
+  
+  // Verify Board model exists immediately after creation
+  if (!hasBoardModel(client)) {
+    console.error('[Prisma] CRITICAL: Board model not found in newly created Prisma client!');
+    console.error('[Prisma] This means the Prisma client was not regenerated after schema changes.');
+    console.error('[Prisma] Please run: npx prisma generate');
+    throw new Error('Prisma client missing Board model. Run: npx prisma generate');
+  }
+  
+  return client;
+}
+
+let prismaInstance: PrismaClient;
+
+if (process.env.NODE_ENV === 'production') {
+  // In production, reuse cached instance
+  prismaInstance = globalForPrisma.prisma ?? createPrismaClient();
+  globalForPrisma.prisma = prismaInstance;
+} else {
+  // In development, always verify and recreate if needed
+  // Force check on every import to catch stale cached instances
+  const cachedClient = globalForPrisma.prisma;
+  const shouldRecreate = !cachedClient || !hasBoardModel(cachedClient);
+  
+  if (shouldRecreate) {
+    // Clear old instance if it exists
+    if (cachedClient) {
+      console.warn('[Prisma] Clearing cached client (missing Board model or invalid)...');
+      try {
+        cachedClient.$disconnect().catch(() => {});
+      } catch {
+        // Ignore disconnect errors
+      }
+      globalForPrisma.prisma = undefined;
+    }
+    
+    // Create fresh instance
+    console.log('[Prisma] Creating new Prisma client instance...');
+    prismaInstance = createPrismaClient();
+    console.log('[Prisma] ✓ Board model confirmed in new Prisma client');
+    globalForPrisma.prisma = prismaInstance;
+  } else {
+    // Cached instance is valid, reuse it
+    console.log('[Prisma] Reusing cached Prisma client (Board model verified)');
+    prismaInstance = cachedClient;
+  }
+}
+
+export const prisma = prismaInstance;
 
 // User interface matching your existing structure
 export interface User {
@@ -49,6 +115,21 @@ export interface User {
   password: string;
   createdAt: string;
   updatedAt: string;
+  // Password reset fields
+  resetPasswordToken?: string | null;
+  resetPasswordExpiry?: Date | string | null;
+  // Email verification fields
+  emailVerified?: boolean;
+  emailVerificationToken?: string | null;
+  emailVerificationExpiry?: Date | string | null;
+  // Subscription fields
+  subscriptionStatus?: string;
+  subscriptionId?: string | null;
+  customerId?: string | null;
+  currentPeriodStart?: Date | string | null;
+  currentPeriodEnd?: Date | string | null;
+  cancelAtPeriodEnd?: boolean;
+  trialEndsAt?: Date | string | null;
 }
 
 export class PrismaDatabase {
@@ -62,8 +143,12 @@ export class PrismaDatabase {
       
       return {
         ...user,
-        preferences: user.preferences as User['preferences'],
-        stats: user.stats as User['stats'],
+        preferences: typeof user.preferences === 'string' 
+          ? JSON.parse(user.preferences) 
+          : user.preferences as User['preferences'],
+        stats: typeof user.stats === 'string'
+          ? JSON.parse(user.stats)
+          : user.stats as User['stats'],
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       };
@@ -83,8 +168,12 @@ export class PrismaDatabase {
       
       return {
         ...user,
-        preferences: user.preferences as User['preferences'],
-        stats: user.stats as User['stats'],
+        preferences: typeof user.preferences === 'string' 
+          ? JSON.parse(user.preferences) 
+          : user.preferences as User['preferences'],
+        stats: typeof user.stats === 'string'
+          ? JSON.parse(user.stats)
+          : user.stats as User['stats'],
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       };
@@ -109,15 +198,38 @@ export class PrismaDatabase {
           plan: userData.plan,
           joinDate: userData.joinDate,
           password: userData.password,
-          preferences: userData.preferences as any,
-          stats: userData.stats as any,
+          preferences: typeof userData.preferences === 'object' 
+            ? JSON.stringify(userData.preferences) 
+            : userData.preferences as any,
+          stats: typeof userData.stats === 'object'
+            ? JSON.stringify(userData.stats)
+            : userData.stats as any,
+          // Email verification fields
+          emailVerified: userData.emailVerified ?? false,
+          emailVerificationToken: userData.emailVerificationToken || null,
+          emailVerificationExpiry: userData.emailVerificationExpiry 
+            ? (typeof userData.emailVerificationExpiry === 'string' 
+                ? new Date(userData.emailVerificationExpiry) 
+                : userData.emailVerificationExpiry)
+            : null,
+          // Password reset fields (optional)
+          resetPasswordToken: userData.resetPasswordToken || null,
+          resetPasswordExpiry: userData.resetPasswordExpiry 
+            ? (typeof userData.resetPasswordExpiry === 'string' 
+                ? new Date(userData.resetPasswordExpiry) 
+                : userData.resetPasswordExpiry)
+            : null,
         }
       });
       
       return {
         ...user,
-        preferences: user.preferences as User['preferences'],
-        stats: user.stats as User['stats'],
+        preferences: typeof user.preferences === 'string' 
+          ? JSON.parse(user.preferences) 
+          : user.preferences as User['preferences'],
+        stats: typeof user.stats === 'string'
+          ? JSON.parse(user.stats)
+          : user.stats as User['stats'],
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       };
@@ -135,15 +247,27 @@ export class PrismaDatabase {
         where: { id },
         data: {
           ...otherUpdates,
-          ...(preferences && { preferences: preferences as any }),
-          ...(stats && { stats: stats as any }),
+          ...(preferences && { 
+            preferences: typeof preferences === 'object' 
+              ? JSON.stringify(preferences) 
+              : preferences as any 
+          }),
+          ...(stats && { 
+            stats: typeof stats === 'object'
+              ? JSON.stringify(stats)
+              : stats as any 
+          }),
         }
       });
       
       return {
         ...user,
-        preferences: user.preferences as User['preferences'],
-        stats: user.stats as User['stats'],
+        preferences: typeof user.preferences === 'string' 
+          ? JSON.parse(user.preferences) 
+          : user.preferences as User['preferences'],
+        stats: typeof user.stats === 'string'
+          ? JSON.parse(user.stats)
+          : user.stats as User['stats'],
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       };
@@ -171,8 +295,12 @@ export class PrismaDatabase {
       
       return users.map(user => ({
         ...user,
-        preferences: user.preferences as User['preferences'],
-        stats: user.stats as User['stats'],
+        preferences: typeof user.preferences === 'string' 
+          ? JSON.parse(user.preferences) 
+          : user.preferences as User['preferences'],
+        stats: typeof user.stats === 'string'
+          ? JSON.parse(user.stats)
+          : user.stats as User['stats'],
         createdAt: user.createdAt.toISOString(),
         updatedAt: user.updatedAt.toISOString(),
       }));
@@ -274,8 +402,8 @@ export class PrismaDatabase {
         await prisma.user.create({
           data: {
             ...userData,
-            preferences: userData.preferences as any,
-            stats: userData.stats as any,
+            preferences: JSON.stringify(userData.preferences),
+            stats: JSON.stringify(userData.stats),
           }
         });
       }
@@ -284,5 +412,460 @@ export class PrismaDatabase {
     } catch (error) {
       console.error('Error seeding database:', error);
     }
+  }
+
+  // Notes Methods
+  static async createNote(data: { title: string; content: string; category?: string | null; tags?: string | null; userId: string; metadata?: string | null }) {
+    return await prisma.note.create({ 
+      data: {
+        title: data.title,
+        content: data.content,
+        category: data.category || null,
+        tags: data.tags || null,
+        userId: data.userId,
+        metadata: data.metadata || null
+      }
+    });
+  }
+
+  static async getUserNotes(userId: string, category?: string) {
+    const where = category ? { userId, category } : { userId };
+    return await prisma.note.findMany({ where, orderBy: { createdAt: 'desc' } });
+  }
+
+  static async updateNote(id: string, data: any) {
+    return await prisma.note.update({ where: { id }, data });
+  }
+
+  static async deleteNote(id: string) {
+    return await prisma.note.delete({ where: { id } });
+  }
+
+  // Flashcards Methods
+  static async createFlashcard(data: { question: string; answer: string; category?: string; difficulty?: string; userId: string; metadata?: any }) {
+    return await prisma.flashcard.create({ data });
+  }
+
+  static async getUserFlashcards(userId: string, category?: string, reviewOnly?: boolean) {
+    const where: any = { userId };
+    if (category) where.category = category;
+    if (reviewOnly) {
+      where.OR = [
+        { lastReviewed: null },
+        { masteryLevel: { lt: 75 } }
+      ];
+    }
+    return await prisma.flashcard.findMany({ where, orderBy: { createdAt: 'desc' } });
+  }
+
+  static async updateFlashcard(id: string, data: any) {
+    return await prisma.flashcard.update({ where: { id }, data });
+  }
+
+  static async deleteFlashcard(id: string) {
+    return await prisma.flashcard.delete({ where: { id } });
+  }
+
+  // Exam Session Methods
+  static async createExamSession(data: { title: string; questions: any; totalQuestions: number; userId: string; metadata?: any }) {
+    return await prisma.examSession.create({ data });
+  }
+
+  static async getExamSessions(userId: string, status?: string) {
+    const where = status ? { userId, status } : { userId };
+    return await prisma.examSession.findMany({ where, orderBy: { createdAt: 'desc' } });
+  }
+
+  static async getExamSession(id: string) {
+    return await prisma.examSession.findUnique({ where: { id } });
+  }
+
+  static async updateExamSession(id: string, data: any) {
+    return await prisma.examSession.update({ where: { id }, data });
+  }
+
+  static async deleteExamSession(id: string) {
+    return await prisma.examSession.delete({ where: { id } });
+  }
+
+  // Focus Session Methods
+  static async createFocusSession(data: { duration: number; mode: string; userId: string; metadata?: any }) {
+    return await prisma.focusSession.create({ data });
+  }
+
+  static async getFocusSessions(userId: string) {
+    return await prisma.focusSession.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
+
+  static async updateFocusSession(id: string, data: any) {
+    return await prisma.focusSession.update({ where: { id }, data });
+  }
+
+  // Question Context Methods
+  static async saveQuestionContext(userId: string, data: { question: string; answer: string; reason: string; category?: string; topic?: string }) {
+    return await prisma.questionContext.create({ data: { ...data, userId } });
+  }
+
+  static async getQuestionContexts(userId: string, category?: string) {
+    const where = category ? { userId, category } : { userId };
+    return await prisma.questionContext.findMany({ where, orderBy: { createdAt: 'desc' } });
+  }
+
+  // Subscription Methods
+  static async createSubscription(data: {
+    userId: string;
+    plan: string;
+    status: string;
+    provider: string;
+    subscriptionId?: string;
+    customerId?: string;
+    currentPeriodStart: Date;
+    currentPeriodEnd: Date;
+  }) {
+    return await prisma.subscription.create({ data });
+  }
+
+  static async getActiveSubscription(userId: string) {
+    return await prisma.subscription.findFirst({
+      where: {
+        userId,
+        status: { in: ['Active', 'Trialing'] },
+      },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        invoices: {
+          orderBy: { createdAt: 'desc' },
+          take: 10,
+        },
+      },
+    });
+  }
+
+  static async getUserSubscriptions(userId: string) {
+    return await prisma.subscription.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        invoices: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+  }
+
+  static async updateSubscription(id: string, data: any) {
+    return await prisma.subscription.update({
+      where: { id },
+      data,
+    });
+  }
+
+  static async cancelSubscription(id: string, cancelAtPeriodEnd: boolean = true) {
+    return await prisma.subscription.update({
+      where: { id },
+      data: {
+        cancelAtPeriodEnd,
+        ...(cancelAtPeriodEnd ? {} : { status: 'Cancelled', cancelledAt: new Date() }),
+      },
+    });
+  }
+
+  // Payment Method Methods
+  static async createPaymentMethod(data: {
+    userId: string;
+    provider: string;
+    methodId: string;
+    type: string;
+    last4?: string;
+    brand?: string;
+    expiryMonth?: number;
+    expiryYear?: number;
+    isDefault?: boolean;
+  }) {
+    // If this is set as default, unset other defaults
+    if (data.isDefault) {
+      await prisma.paymentMethod.updateMany({
+        where: { userId: data.userId, isDefault: true },
+        data: { isDefault: false },
+      });
+    }
+    return await prisma.paymentMethod.create({ data });
+  }
+
+  static async getUserPaymentMethods(userId: string) {
+    return await prisma.paymentMethod.findMany({
+      where: { userId },
+      orderBy: [{ isDefault: 'desc' }, { createdAt: 'desc' }],
+    });
+  }
+
+  static async setDefaultPaymentMethod(userId: string, paymentMethodId: string) {
+    // Unset all defaults
+    await prisma.paymentMethod.updateMany({
+      where: { userId, isDefault: true },
+      data: { isDefault: false },
+    });
+    // Set new default
+    return await prisma.paymentMethod.update({
+      where: { id: paymentMethodId },
+      data: { isDefault: true },
+    });
+  }
+
+  static async deletePaymentMethod(id: string) {
+    return await prisma.paymentMethod.delete({ where: { id } });
+  }
+
+  // Invoice Methods
+  static async createInvoice(data: {
+    subscriptionId: string;
+    invoiceId: string;
+    amount: number;
+    currency?: string;
+    status: string;
+    dueDate: Date;
+    paidAt?: Date;
+    pdfUrl?: string;
+  }) {
+    return await prisma.invoice.create({ data });
+  }
+
+  static async getSubscriptionInvoices(subscriptionId: string) {
+    return await prisma.invoice.findMany({
+      where: { subscriptionId },
+      orderBy: { createdAt: 'desc' },
+    });
+  }
+
+  static async getUserInvoices(userId: string) {
+    const subscriptions = await prisma.subscription.findMany({
+      where: { userId },
+      select: { id: true },
+    });
+    const subscriptionIds = subscriptions.map((s) => s.id);
+    return await prisma.invoice.findMany({
+      where: { subscriptionId: { in: subscriptionIds } },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        subscription: {
+          select: {
+            plan: true,
+            status: true,
+          },
+        },
+      },
+    });
+  }
+
+  static async updateInvoice(id: string, data: any) {
+    return await prisma.invoice.update({
+      where: { id },
+      data,
+    });
+  }
+
+  // Chat Session Methods
+  static async createChatSession(data: {
+    userId: string;
+    title: string;
+  }) {
+    return await prisma.chatSession.create({ data });
+  }
+
+  static async getUserChatSessions(userId: string, limit: number = 50) {
+    return await prisma.chatSession.findMany({
+      where: { userId },
+      orderBy: { updatedAt: 'desc' },
+      take: limit, // Limit number of sessions to avoid loading too many
+      select: {
+        id: true,
+        title: true,
+        createdAt: true,
+        updatedAt: true,
+        userId: true,
+        _count: {
+          select: {
+            messages: true, // Just count messages, don't fetch them
+          },
+        },
+      },
+    });
+  }
+
+  static async getChatSession(id: string) {
+    return await prisma.chatSession.findUnique({
+      where: { id },
+      include: {
+        messages: {
+          orderBy: { timestamp: 'asc' },
+        },
+      },
+    });
+  }
+
+  static async updateChatSession(id: string, data: { title?: string }) {
+    return await prisma.chatSession.update({
+      where: { id },
+      data,
+    });
+  }
+
+  static async deleteChatSession(id: string) {
+    return await prisma.chatSession.delete({ where: { id } });
+  }
+
+  // Message Methods
+  static async createMessage(data: {
+    sessionId: string;
+    text: string;
+    isUser: boolean;
+    metadata?: string;
+  }) {
+    return await prisma.message.create({ data });
+  }
+
+  static async getSessionMessages(sessionId: string) {
+    return await prisma.message.findMany({
+      where: { sessionId },
+      orderBy: { timestamp: 'asc' },
+    });
+  }
+
+  static async deleteMessage(id: string) {
+    return await prisma.message.delete({ where: { id } });
+  }
+
+  // ==================== NOTIFICATIONS ====================
+
+  static async createNotification(data: {
+    userId: string;
+    type: string;
+    title: string;
+    message: string;
+    icon?: string;
+    metadata?: string;
+  }) {
+    return await prisma.notification.create({ data });
+  }
+
+  static async getUserNotifications(userId: string, options?: {
+    type?: string;
+    read?: boolean;
+    limit?: number;
+    offset?: number;
+  }) {
+    const where: any = { userId };
+    if (options?.type) where.type = options.type;
+    if (options?.read !== undefined) where.read = options.read;
+
+    return await prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      take: options?.limit,
+      skip: options?.offset,
+    });
+  }
+
+  static async getUnreadNotificationCount(userId: string) {
+    return await prisma.notification.count({
+      where: {
+        userId,
+        read: false,
+      },
+    });
+  }
+
+  static async markNotificationAsRead(id: string) {
+    return await prisma.notification.update({
+      where: { id },
+      data: {
+        read: true,
+        readAt: new Date(),
+      },
+    });
+  }
+
+  static async markAllNotificationsAsRead(userId: string) {
+    return await prisma.notification.updateMany({
+      where: {
+        userId,
+        read: false,
+      },
+      data: {
+        read: true,
+        readAt: new Date(),
+      },
+    });
+  }
+
+  static async deleteNotification(id: string) {
+    return await prisma.notification.delete({ where: { id } });
+  }
+
+  static async deleteAllNotifications(userId: string) {
+    return await prisma.notification.deleteMany({ where: { userId } });
+  }
+
+  // Mind Map Methods
+  static async createMindMap(data: {
+    title: string;
+    structure: string;
+    category?: string;
+    colorScheme?: string;
+    userId: string;
+    metadata?: any;
+  }) {
+    return await prisma.mindMap.create({
+      data: {
+        title: data.title,
+        structure: data.structure,
+        category: data.category,
+        colorScheme: data.colorScheme || 'default',
+        userId: data.userId,
+        metadata: data.metadata || {}
+      }
+    });
+  }
+
+  static async getMindMaps(userId: string, category?: string) {
+    const where = category ? { userId, category } : { userId };
+    return await prisma.mindMap.findMany({
+      where,
+      orderBy: { updatedAt: 'desc' }
+    });
+  }
+
+  static async getMindMapById(id: string) {
+    return await prisma.mindMap.findUnique({
+      where: { id }
+    });
+  }
+
+  static async updateMindMap(
+    id: string,
+    data: {
+      title?: string;
+      structure?: string;
+      category?: string;
+      colorScheme?: string;
+      metadata?: any;
+    }
+  ) {
+    return await prisma.mindMap.update({
+      where: { id },
+      data: {
+        ...(data.title && { title: data.title }),
+        ...(data.structure && { structure: data.structure }),
+        ...(data.category !== undefined && { category: data.category }),
+        ...(data.colorScheme && { colorScheme: data.colorScheme }),
+        ...(data.metadata && { metadata: data.metadata })
+      }
+    });
+  }
+
+  static async deleteMindMap(id: string) {
+    return await prisma.mindMap.delete({
+      where: { id }
+    });
   }
 }

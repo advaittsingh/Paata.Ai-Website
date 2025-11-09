@@ -2,20 +2,29 @@
 
 import { useState, useRef, useEffect } from "react";
 import { Typography, Button, IconButton } from "@material-tailwind/react";
-import { PaperAirplaneIcon, PlusIcon, TrashIcon, Bars3Icon, XMarkIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { Navbar } from "@/components";
+import { PaperAirplaneIcon, PlusIcon, TrashIcon, Bars3Icon, XMarkIcon, ExclamationTriangleIcon, DocumentIcon } from "@heroicons/react/24/outline";
+import { Navbar, MathRenderer, ScientificRenderer } from "@/components";
 import { formatTextWithHTML } from "@/utils/textFormatter";
+import { formatAIResponse, getResponseIcon, getResponseColor } from "@/utils/responseFormatter";
 import ChatImageUpload from "@/components/chat-image-upload";
+import ChatPDFUpload from "@/components/chat-pdf-upload";
 import VoiceRecorder from "@/components/voice-recorder";
 import SpeechSynthesis from "@/components/speech-synthesis";
 import { useUser } from "@/contexts/UserContext";
 import { getPlanFeatures, canUseFeature, getRemainingConversations } from "@/utils/planLimits";
+import { ChatSkeleton, ChatMessageSkeleton } from "@/components/loading-skeleton";
+import { ErrorBoundary } from "@/components/error-boundary";
+import AppSidebar from "@/components/app-sidebar";
 
 interface Message {
   id: string;
   text: string;
   isUser: boolean;
   timestamp: Date;
+  formattedText?: string;
+  hasCode?: boolean;
+  hasLists?: boolean;
+  hasHeaders?: boolean;
 }
 
 interface ChatSession {
@@ -28,26 +37,7 @@ interface ChatSession {
 export default function WebApp() {
   const { user, isAuthenticated, isLoading, updateUser } = useUser();
   
-  // Only redirect if we've finished loading and user is not authenticated
-  useEffect(() => {
-    if (!isLoading && !isAuthenticated) {
-      window.location.href = '/auth/login';
-    }
-  }, [isLoading, isAuthenticated]);
-
-  // Show loading while checking authentication
-  if (isLoading || !isAuthenticated) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#612A74] mx-auto mb-4"></div>
-          <Typography color="gray">
-            {isLoading ? 'Loading...' : 'Redirecting to login...'}
-          </Typography>
-        </div>
-      </div>
-    );
-  }
+  // All state hooks must be called before any conditional returns
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "1",
@@ -60,9 +50,20 @@ export default function WebApp() {
   const [isChatLoading, setIsChatLoading] = useState(false);
   const [selectedImage, setSelectedImage] = useState<File | null>(null);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [selectedPDF, setSelectedPDF] = useState<File | null>(null);
+  const [pdfText, setPdfText] = useState<string | null>(null);
+  const [isExtractingPDF, setIsExtractingPDF] = useState(false);
+  const [pdfExtractionError, setPdfExtractionError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [chatSessions, setChatSessions] = useState<ChatSession[]>([]);
+  // ChatGPT-style: Use Record/object for sessions (one source of truth)
+  const [sessions, setSessions] = useState<Record<string, ChatSession>>({});
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [isLoadingSessions, setIsLoadingSessions] = useState(false);
+  const [hasLoadedSessions, setHasLoadedSessions] = useState(false);
+  const [hasInitializedNewChat, setHasInitializedNewChat] = useState(false);
+  const deletedSessionsRef = useRef<Set<string>>(new Set()); // Track deleted session IDs to prevent reloading
+  const creatingSessionRef = useRef<string | null>(null); // Track which session is being created
+  const isSyncingRef = useRef(false); // Sync lock guard to prevent feedback loops
   const [currentContext, setCurrentContext] = useState<{
     contextType?: 'text' | 'image' | 'voice';
     relatedContexts?: number;
@@ -81,15 +82,134 @@ export default function WebApp() {
     requiredFeature?: string;
   }>({ show: false, message: '', upgradeRequired: false });
   const [latestAIResponse, setLatestAIResponse] = useState<string>('');
+  const [reasoningMode, setReasoningMode] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  
+  // Define scrollToBottom function before useEffect hooks
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // Helper function to check if a session is empty (only contains AI greeting)
+  const isSessionEmpty = (messages: Message[]): boolean => {
+    if (messages.length === 0) return true;
+    if (messages.length === 1) {
+      const message = messages[0];
+      // Check if it's only the AI greeting message
+      return !message.isUser && message.text.includes("Hello! I'm PAATA.AI, your intelligent homework assistant");
+    }
+    return false;
+  };
+  
+  // Only redirect if we've finished loading and user is not authenticated
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      window.location.href = '/auth/login';
+    }
+  }, [isLoading, isAuthenticated]);
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  // ChatGPT-style: Update current session when messages change (idempotent - no loops)
+  useEffect(() => {
+    if (!currentSessionId || isSyncingRef.current) return;
+    if (!hasLoadedSessions) return;
+
+    const current = sessions[currentSessionId];
+    if (!current) return;
+
+    const prevLast = current.messages.at(-1)?.id;
+    const nextLast = messages.at(-1)?.id;
+
+    // Only update if message count or latest ID changed
+    if (current.messages.length === messages.length && prevLast === nextLast) return;
+
+    // Update without triggering sync lock (this is a local state update)
+    setSessions(prev => ({
+      ...prev,
+      [currentSessionId]: {
+        ...prev[currentSessionId],
+        messages,
+        timestamp: new Date(),
+      },
+    }));
+  }, [messages, currentSessionId, hasLoadedSessions]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setSidebarOpen(true);
+      } else {
+        setSidebarOpen(false);
+      }
+    };
+
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Initialize new chat on mount if not already done
+  useEffect(() => {
+    if (!hasInitializedNewChat && !currentSessionId) {
+      const newSession: ChatSession = {
+        id: Date.now().toString(),
+        title: "New Chat",
+        timestamp: new Date(),
+        messages: [
+          {
+            id: "1",
+            text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
+            isUser: false,
+            timestamp: new Date(),
+          },
+        ],
+      };
+      
+      setSessions(prev => ({
+        ...prev,
+        [newSession.id]: newSession,
+      }));
+      
+      setCurrentSessionId(newSession.id);
+      setMessages(newSession.messages);
+      setHasInitializedNewChat(true);
+                      }
+  }, [hasInitializedNewChat, currentSessionId]);
+
+  // Chat history loading disabled - removed for now
+  // useEffect(() => {
+  //   // Session loading code removed
+  // }, [user?.id, sidebarOpen]);
+                    
+  // Chat history saving disabled - removed for now
+  // useEffect(() => {
+  //   // localStorage saving code removed
+  // }, [sessions, hasLoadedSessions]);
+
+  // Chat history database saving disabled - removed for now
+
+  // Show loading while checking authentication
+  if (isLoading || !isAuthenticated) {
+    return (
+      <ErrorBoundary>
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center">
+            <ChatSkeleton />
+            <Typography color="gray" className="mt-4">
+              {isLoading ? 'Loading...' : 'Redirecting to login...'}
+            </Typography>
+          </div>
+        </div>
+      </ErrorBoundary>
+    );
+  }
 
   // Get plan features for current user
   const planFeatures = user ? getPlanFeatures(user.plan) : null;
   const remainingConversations = user ? getRemainingConversations(user.plan, user.stats?.totalInteractions || 0) : null;
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
 
   const generateChatTitle = (message: string): string => {
     // Clean up the message and create a meaningful title
@@ -162,90 +282,30 @@ export default function WebApp() {
     return context;
   };
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+  const handleSendMessage = async () => {
+    if ((!inputText.trim() && !selectedImage && !selectedPDF) || isChatLoading) return;
 
-  // Auto-save messages to current session
-  useEffect(() => {
-    if (messages.length > 0 && currentSessionId) {
-      setChatSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? { ...session, messages: messages }
-          : session
-      ));
+    // If there's a PDF, use the PDF upload function
+    if (selectedPDF) {
+      await handlePDFWithPrompt(selectedPDF, inputText || "Please analyze this PDF");
+      setInputText("");
+      return;
     }
-  }, [messages, currentSessionId]);
 
-  useEffect(() => {
-    const handleResize = () => {
-      if (window.innerWidth >= 1024) {
-        setSidebarOpen(true);
-      } else {
-        setSidebarOpen(false);
-      }
-    };
+    // If there's an image, use the image upload function
+    if (selectedImage) {
+      await handleImageWithPrompt(selectedImage, inputText || "Please analyze this image");
+      setSelectedImage(null);
+      setImagePreview(null);
+      setInputText("");
+      return;
+    }
 
-    handleResize();
-    window.addEventListener('resize', handleResize);
-    return () => window.removeEventListener('resize', handleResize);
-  }, []);
-
-  // Load chat sessions from localStorage on component mount
-  useEffect(() => {
-    const savedSessions = localStorage.getItem('paata-chat-sessions');
-    if (savedSessions) {
-      try {
-        const parsedSessions = JSON.parse(savedSessions);
-        // Convert timestamp strings back to Date objects
-        const sessionsWithDates = parsedSessions.map((session: any) => ({
-          ...session,
-          timestamp: new Date(session.timestamp),
-          messages: session.messages.map((msg: any) => ({
-            ...msg,
-            timestamp: new Date(msg.timestamp)
-          }))
-        }));
-        setChatSessions(sessionsWithDates);
-        
-        // If there are saved sessions, select the most recent one
-        if (sessionsWithDates.length > 0) {
-          const mostRecentSession = sessionsWithDates[0]; // Assuming they're sorted by most recent
-          setCurrentSessionId(mostRecentSession.id);
-          if (mostRecentSession.messages.length > 0) {
-            setMessages(mostRecentSession.messages);
-          } else {
-            setMessages([
-              {
-                id: "1",
-                text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
-                isUser: false,
-                timestamp: new Date(),
-              },
-            ]);
-          }
-        } else {
-          // No saved sessions, create a new one
-          const newSession: ChatSession = {
-            id: Date.now().toString(),
-            title: "New Chat",
-            timestamp: new Date(),
-            messages: [
-              {
-                id: "1",
-                text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
-                isUser: false,
-                timestamp: new Date(),
-              },
-            ],
-          };
-          setChatSessions([newSession]);
-          setCurrentSessionId(newSession.id);
-          setMessages(newSession.messages);
-        }
-      } catch (error) {
-        console.error('Error loading chat sessions:', error);
-        // If there's an error, create a new chat
+    // Ensure we have a valid session before sending messages
+    let activeSessionId = currentSessionId;
+    if (!activeSessionId) {
+      // only create when there are zero sessions
+      if (Object.keys(sessions).length === 0) {
         const newSession: ChatSession = {
           id: Date.now().toString(),
           title: "New Chat",
@@ -259,48 +319,30 @@ export default function WebApp() {
             },
           ],
         };
-        setChatSessions([newSession]);
-        setCurrentSessionId(newSession.id);
-        setMessages(newSession.messages);
+        if (!isSyncingRef.current) {
+          setSessions(prev => ({ ...prev, [newSession.id]: newSession }));
+          activeSessionId = newSession.id;
+          setCurrentSessionId(activeSessionId);
+          isSyncingRef.current = true;
+          setMessages(newSession.messages);
+          setTimeout(() => {
+            isSyncingRef.current = false;
+          }, 200);
+        }
+      } else {
+        // pick the most recent existing session
+        const mostRecent = Object.values(sessions)
+          .sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime())[0];
+        if (mostRecent?.id) {
+          activeSessionId = mostRecent.id;
+          setCurrentSessionId(mostRecent.id);
+          isSyncingRef.current = true;
+          setMessages(mostRecent.messages);
+          setTimeout(() => {
+            isSyncingRef.current = false;
+          }, 200);
+        }
       }
-    } else {
-      // No saved sessions, create a new one
-      const newSession: ChatSession = {
-        id: Date.now().toString(),
-        title: "New Chat",
-        timestamp: new Date(),
-        messages: [
-          {
-            id: "1",
-            text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
-            isUser: false,
-            timestamp: new Date(),
-          },
-        ],
-      };
-      setChatSessions([newSession]);
-      setCurrentSessionId(newSession.id);
-      setMessages(newSession.messages);
-    }
-  }, []);
-
-  // Save chat sessions to localStorage whenever they change
-  useEffect(() => {
-    if (chatSessions.length > 0) {
-      localStorage.setItem('paata-chat-sessions', JSON.stringify(chatSessions));
-    }
-  }, [chatSessions]);
-
-  const handleSendMessage = async () => {
-    if ((!inputText.trim() && !selectedImage) || isChatLoading) return;
-
-    // If there's an image, use the image upload function
-    if (selectedImage) {
-      await handleImageWithPrompt(selectedImage, inputText || "Please analyze this image");
-      setSelectedImage(null);
-      setImagePreview(null);
-      setInputText("");
-      return;
     }
 
     const userMessage: Message = {
@@ -310,16 +352,26 @@ export default function WebApp() {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    // Prevent duplicate messages
+    setMessages(prev => {
+      const all = [...prev, userMessage];
+      const deduped = Array.from(new Map(all.map(m => [m.id, m])).values());
+      return deduped;
+    });
     
     // Update chat session title if it's the first user message
-    if (messages.length === 1) {
+    if (messages.length === 1 && activeSessionId) {
       const newTitle = generateChatTitle(inputText);
-      setChatSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? { ...session, title: newTitle }
-          : session
-      ));
+      setSessions(prev => {
+        if (!prev[activeSessionId]) return prev;
+        return {
+          ...prev,
+          [activeSessionId]: {
+            ...prev[activeSessionId],
+            title: newTitle,
+          },
+        };
+      });
     }
     
     const currentInput = inputText;
@@ -349,13 +401,14 @@ export default function WebApp() {
           message: currentInput,
           conversationHistory: conversationHistory,
           sessionContext: sessionContext,
-          sessionId: currentSessionId || 'default-session',
+          sessionId: activeSessionId || currentSessionId || 'default-session',
           inputType: 'text',
           contextMetadata: {
             messageCount: messages.length,
-            sessionTitle: chatSessions.find(s => s.id === currentSessionId)?.title || 'New Chat'
+            sessionTitle: sessions[activeSessionId || currentSessionId || '']?.title || 'New Chat'
           },
-          userId: user?.id
+          userId: user?.id,
+          mode: reasoningMode ? 'reasoning' : 'standard'
         }),
         cache: 'no-store'
       });
@@ -396,14 +449,44 @@ export default function WebApp() {
         setUsageInfo(data.usage);
       }
       
+      const formatted = formatAIResponse(data.response);
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         text: data.response,
+        formattedText: formatted.text,
+        hasCode: formatted.hasCode,
+        hasLists: formatted.hasLists,
+        hasHeaders: formatted.hasHeaders,
         isUser: false,
         timestamp: new Date(),
       };
       
-      setMessages(prev => [...prev, aiResponse]);
+      // ChatGPT-style: Prevent duplicate messages
+      setMessages(prev => {
+        const exists = prev.some(m => m.id === aiResponse.id);
+        return exists ? prev : [...prev, aiResponse];
+      });
+      
+      // Ensure session exists in database before saving messages
+      // This guarantees all messages in this conversation go to the same session
+      const dbSessionId = await ensureSessionInDatabase(activeSessionId || currentSessionId || '');
+      
+      if (dbSessionId) {
+        // Update currentSessionId if it changed
+        if (dbSessionId !== (activeSessionId || currentSessionId)) {
+          setCurrentSessionId(dbSessionId);
+        }
+        
+        // Save both user message and AI response to database using the same session
+        await saveMessageToDatabase(userMessage, {
+          inputType: 'text'
+        });
+        await saveMessageToDatabase(aiResponse, {
+          inputType: 'text',
+          isResponse: true
+        });
+      }
+      
       setLatestAIResponse(data.response);
       
       // Update context information if available
@@ -426,7 +509,32 @@ export default function WebApp() {
         timestamp: new Date(),
       };
       
-      setMessages(prev => [...prev, fallbackResponse]);
+      // Prevent duplicate messages
+      setMessages(prev => {
+        const all = [...prev, fallbackResponse];
+        const deduped = Array.from(new Map(all.map(m => [m.id, m])).values());
+        return deduped;
+      });
+      
+      // Ensure session exists in database before saving messages
+      const dbSessionId = await ensureSessionInDatabase(activeSessionId || currentSessionId || '');
+      
+      if (dbSessionId) {
+        // Update currentSessionId if it changed
+        if (dbSessionId !== (activeSessionId || currentSessionId)) {
+          setCurrentSessionId(dbSessionId);
+        }
+        
+        // Save user message and fallback response to database using the same session
+        await saveMessageToDatabase(userMessage, {
+          inputType: 'text'
+        });
+        await saveMessageToDatabase(fallbackResponse, {
+          inputType: 'text',
+          isResponse: true,
+          isError: true
+        });
+      }
     } finally {
       setIsChatLoading(false);
     }
@@ -448,6 +556,412 @@ export default function WebApp() {
     setImagePreview(null);
   };
 
+  const handlePDFSelect = async (file: File) => {
+    console.log('handlePDFSelect called with file:', file.name, file.size, file.type);
+    
+    if (!file) {
+      console.error('No file provided to handlePDFSelect');
+      return;
+    }
+    
+    setSelectedPDF(file);
+    setPdfExtractionError(null);
+    setIsExtractingPDF(true);
+    setPdfText(null); // Clear previous text
+    
+    console.log('Starting PDF extraction for:', file.name);
+    
+    try {
+      // Extract text from PDF
+      const formData = new FormData();
+      formData.append('pdf', file);
+      
+      console.log('Sending PDF to extraction API:', {
+        fileName: file.name,
+        fileSize: file.size,
+        fileType: file.type
+      });
+      
+      const response = await fetch('/api/chat/pdf-extract', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData,
+      });
+      
+      console.log('PDF extraction API response status:', response.status, response.statusText);
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        const errorMessage = errorData.error || errorData.message || 'Failed to extract text from PDF';
+        
+        // Store error but keep PDF selected
+        let userFriendlyError = errorMessage;
+        
+        // Provide helpful guidance based on error type
+        if (errorMessage.includes('PDF processing library not available') || 
+            errorMessage.includes('OCR service not available')) {
+          userFriendlyError = 'PDF processing is currently unavailable. You can still use the PDF by:\n' +
+            '1. Converting PDF pages to images (JPEG/PNG) and uploading those\n' +
+            '2. Copying and pasting the text from the PDF directly\n' +
+            '3. Using a PDF with selectable text if available';
+        } else if (errorMessage.includes('too large') || errorMessage.includes('size limit')) {
+          userFriendlyError = errorMessage + '\n\nPlease try with a smaller file or split the PDF into parts.';
+        }
+        
+        setPdfExtractionError(userFriendlyError);
+        console.error('PDF extraction failed:', errorMessage);
+        return; // Keep PDF selected so user can see it
+      }
+
+      const data = await response.json();
+      if (data.success && data.text) {
+        setPdfText(data.text);
+        setPdfExtractionError(null); // Clear any previous errors
+        console.log('PDF extracted successfully:', {
+          textLength: data.text.length,
+          numPages: data.numPages,
+          fileName: data.fileName
+        });
+      } else {
+        setPdfExtractionError('Failed to extract text from PDF. The PDF may be image-based or corrupted. You can still try to use it.');
+        console.error('PDF extraction returned no text');
+      }
+    } catch (error: any) {
+      console.error('PDF extraction error:', error);
+      
+      // Store error but keep PDF selected
+      const errorMsg = error.message || 'Failed to extract text from PDF. The PDF is still selected - you can try to use it or remove it.';
+      setPdfExtractionError(errorMsg);
+    } finally {
+      setIsExtractingPDF(false);
+    }
+  };
+
+  const handlePDFRemove = () => {
+    setSelectedPDF(null);
+    setPdfText(null);
+    setPdfExtractionError(null);
+  };
+
+  // Helper function to ensure session exists in database and get its ID
+  // Chat history disabled - no database operations
+  const ensureSessionInDatabase = async (sessionId: string): Promise<string | null> => {
+    // Disabled - return null to skip database operations
+    return null;
+    if (!user?.id) return null;
+    
+    // If session already exists in database (IDs start with 'cl'), return it
+    if (sessionId.startsWith('cl')) {
+      return sessionId;
+    }
+    
+    // Check if we're already creating this session
+    if (creatingSessionRef.current === sessionId) {
+      // Wait a bit and retry
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const updatedSession = sessions[sessionId];
+      if (updatedSession && updatedSession.id.startsWith('cl')) {
+        return updatedSession.id;
+      }
+      // If still not created, wait a bit more
+      await new Promise(resolve => setTimeout(resolve, 300));
+      const retrySession = sessions[sessionId];
+      if (retrySession && retrySession.id.startsWith('cl')) {
+        return retrySession.id;
+      }
+      return null;
+    }
+    
+    // Create session in database
+    creatingSessionRef.current = sessionId;
+    const currentSession = sessions[sessionId];
+    
+    try {
+      const createResponse = await fetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          title: currentSession?.title || 'New Chat',
+        }),
+      });
+      
+      if (createResponse.ok) {
+        const data = await createResponse.json();
+        const dbSessionId = data.session.id;
+        
+        // Update current session ID immediately
+        if (currentSessionId === sessionId) {
+          setCurrentSessionId(dbSessionId);
+        }
+        
+        // ChatGPT-style: Update session in Record (replace old ID with new)
+        setSessions(prev => {
+          if (!prev[sessionId]) return prev;
+          const updated = { ...prev };
+          delete updated[sessionId]; // Remove old ID
+          updated[dbSessionId] = { ...prev[sessionId], id: dbSessionId }; // Add with new ID
+          return updated;
+        });
+        
+        creatingSessionRef.current = null;
+        return dbSessionId;
+      } else {
+        console.error('Failed to create session:', await createResponse.text());
+        creatingSessionRef.current = null;
+        return null;
+      }
+    } catch (error) {
+      console.error('Error creating session:', error);
+      creatingSessionRef.current = null;
+      return null;
+    }
+  };
+
+  // Helper function to save messages to database immediately
+  // This ensures all messages in a conversation are saved to the SAME session
+  // Chat history saving disabled - removed for now
+  const saveMessageToDatabase = async (message: Message, metadata?: any) => {
+    // Disabled - no database saving
+    return;
+    if (!user?.id || !currentSessionId) {
+      console.log('Cannot save message: user or session not available');
+      return;
+    }
+    
+    try {
+      // Ensure session exists in database and get the database session ID
+      const dbSessionId = await ensureSessionInDatabase(currentSessionId);
+      
+      if (!dbSessionId) {
+        console.warn('Could not ensure session in database, message will be saved later');
+        return;
+      }
+      
+      // Save message to database using the correct session ID
+      const messageResponse = await fetch(`/api/chat/sessions/${dbSessionId}/messages`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({
+          text: message.text,
+          isUser: message.isUser,
+          metadata: metadata ? JSON.stringify(metadata) : undefined,
+        }),
+      });
+      
+      if (messageResponse.ok) {
+        const messageData = await messageResponse.json();
+        // Update message ID with database ID if needed
+        if (messageData.message?.id && messageData.message.id !== message.id) {
+          setMessages(prev => prev.map(msg => 
+            msg.id === message.id ? { ...msg, id: messageData.message.id } : msg
+          ));
+        }
+        console.log('✅ Message saved to database:', messageData.message?.id);
+      } else {
+        const errorText = await messageResponse.text();
+        console.error('Failed to save message:', errorText);
+      }
+    } catch (error) {
+      console.error('Error saving message to database:', error);
+    }
+  };
+
+  const handlePDFWithPrompt = async (file: File, prompt: string) => {
+    // Wait for PDF extraction if still in progress
+    if (isExtractingPDF) {
+      alert('Please wait for PDF extraction to complete');
+      return;
+    }
+
+    // For exam papers, allow proceeding even if PDF extraction failed
+    // Only trigger for very specific exam paper keywords (not just "solve question")
+    const isExamPaperRequest = /solve.*entire.*paper|solve.*all.*questions.*paper|solve.*entire.*exam|previous.*year.*paper|previous.*year.*question.*paper|pyq.*paper|exam.*paper.*solve/i.test(prompt) || 
+                               /exam.*paper|previous.*year.*paper|pyq.*paper/i.test(file.name);
+    
+    if (!pdfText) {
+      if (pdfExtractionError) {
+        if (isExamPaperRequest) {
+          // For exam papers, allow proceeding with a warning
+          const proceed = confirm('PDF text extraction failed:\n\n' + pdfExtractionError + '\n\nDo you want to proceed anyway? The AI will attempt to solve the paper, but may have limited access to the content.');
+          if (!proceed) {
+            return;
+          }
+        } else {
+          alert('PDF text extraction failed:\n\n' + pdfExtractionError + '\n\nYou can still try to ask questions about the PDF, but the AI may not have access to the full content.');
+          return;
+        }
+      } else {
+        alert('PDF text extraction is still in progress. Please wait a moment and try again.');
+        return;
+      }
+    }
+
+    // Create a message showing the PDF upload
+    const pdfMessage: Message = {
+      id: Date.now().toString(),
+      text: `📄 PDF uploaded: "${file.name}"\n\n${prompt}`,
+      isUser: true,
+      timestamp: new Date(),
+    };
+
+    // Prevent duplicate messages
+    setMessages(prev => {
+      const all = [...prev, pdfMessage];
+      const deduped = Array.from(new Map(all.map(m => [m.id, m])).values());
+      return deduped;
+    });
+    
+    // Save PDF message to database immediately
+    await saveMessageToDatabase(pdfMessage, {
+      pdfFileName: file.name,
+      pdfSize: file.size,
+      pdfTextLength: pdfText?.length || 0,
+      isExamPaper: isExamPaperRequest,
+      inputType: 'pdf'
+    });
+    
+    setIsChatLoading(true);
+
+    try {
+      // Prepare conversation history
+      const conversationHistory = messages.slice(-10).map(msg => ({
+        text: msg.text,
+        isUser: msg.isUser,
+        timestamp: msg.timestamp
+      }));
+
+      // Generate session context
+      const sessionContext = generateSessionContext(messages);
+
+      // Detect if this is an exam paper to solve
+      // Only trigger for very specific exam paper keywords (not just "solve question")
+      const isExamPaper = /solve.*entire.*paper|solve.*all.*questions.*paper|solve.*entire.*exam|previous.*year.*paper|previous.*year.*question.*paper|pyq.*paper|exam.*paper.*solve/i.test(prompt) || 
+                         /exam.*paper|previous.*year.*paper|pyq.*paper/i.test(file.name);
+      
+      console.log('📝 PDF upload detected:', {
+        fileName: file.name,
+        prompt: prompt,
+        isExamPaper: isExamPaper,
+        pdfTextLength: pdfText?.length || 0,
+        hasPdfText: !!pdfText
+      });
+      
+      // For exam papers, send full PDF text; for others, truncate to 50k chars
+      // If PDF extraction failed, still try to process with the prompt
+      const maxTextLength = isExamPaper && pdfText ? pdfText.length : (pdfText ? Math.min(pdfText.length, 50000) : 0);
+      const pdfContent = pdfText ? pdfText.substring(0, maxTextLength) : '';
+      const isTruncated = pdfText ? pdfText.length > maxTextLength : false;
+      
+      // Create enhanced message with PDF context
+      let enhancedMessage = '';
+      if (isExamPaper) {
+        if (pdfContent) {
+          enhancedMessage = `${prompt}\n\n[EXAM PAPER CONTENT - SOLVE ALL QUESTIONS:]\n${pdfContent}${isTruncated ? '\n\n[... PDF content continues but may be truncated ...]' : ''}`;
+        } else {
+          // Even if PDF extraction failed, still send the exam paper prompt
+          enhancedMessage = `${prompt}\n\n[NOTE: PDF text extraction may have failed, but please attempt to solve the exam paper based on the user's request. If you can see any content above, use it. Otherwise, ask the user to ensure the PDF is readable.]`;
+        }
+      } else {
+        if (pdfContent) {
+          enhancedMessage = `${prompt}\n\n[PDF Document Content:]\n${pdfContent}${isTruncated ? '\n\n[... PDF content truncated for length ...]' : ''}`;
+        } else {
+          enhancedMessage = `${prompt}\n\n[NOTE: PDF text extraction may have failed. Please respond based on the user's prompt.]`;
+        }
+      }
+
+      // Call the chat API with PDF context
+      const response = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          message: enhancedMessage,
+          conversationHistory: conversationHistory,
+          sessionContext: sessionContext,
+          sessionId: currentSessionId || 'default-session',
+          inputType: 'pdf',
+          questionType: isExamPaper ? 'exam_question' : 'pdf_question',
+          contextMetadata: {
+            pdfFileName: file.name,
+            pdfSize: file.size,
+            pdfTextLength: pdfText?.length || 0,
+            isExamPaper: isExamPaper,
+            messageCount: messages.length,
+            sessionTitle: sessions[currentSessionId || '']?.title || 'New Chat'
+          },
+          userId: user?.id,
+          mode: reasoningMode ? 'reasoning' : 'standard'
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        
+        // Handle authentication errors
+        if (response.status === 401 && errorData.requiresAuth) {
+          window.location.href = '/auth/login';
+          return;
+        }
+        
+        throw new Error(errorData.error || `Server error: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      // Add AI response
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: data.response,
+        isUser: false,
+        timestamp: new Date(),
+      };
+
+      // Prevent duplicate messages
+      setMessages(prev => (prev.some(m => m.id === aiMessage.id) ? prev : [...prev, aiMessage]));
+      
+      // Save AI response to database immediately
+      await saveMessageToDatabase(aiMessage, {
+        inputType: 'pdf',
+        isResponse: true
+      });
+      
+      setLatestAIResponse(data.response);
+      setCurrentContext(data.context || {});
+      setUsageInfo(data.usage || null);
+      
+      // Clear PDF after successful message
+      setSelectedPDF(null);
+      setPdfText(null);
+      
+    } catch (error: any) {
+      console.error('Error sending PDF message:', error);
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        text: `Error: ${error.message || 'Failed to process PDF. Please try again.'}`,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      // Prevent duplicate messages
+      setMessages(prev => {
+        const all = [...prev, errorMessage];
+        const deduped = Array.from(new Map(all.map(m => [m.id, m])).values());
+        return deduped;
+      });
+      
+      // Save error message to database
+      await saveMessageToDatabase(errorMessage, {
+        inputType: 'pdf',
+        isError: true
+      });
+    } finally {
+      setIsChatLoading(false);
+      scrollToBottom();
+    }
+  };
+
   const handleImageWithPrompt = async (file: File, prompt: string) => {
     // Create a message showing the image upload
     const imageMessage: Message = {
@@ -457,7 +971,12 @@ export default function WebApp() {
       timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, imageMessage]);
+    // Prevent duplicate messages
+    setMessages(prev => {
+      const all = [...prev, imageMessage];
+      const deduped = Array.from(new Map(all.map(m => [m.id, m])).values());
+      return deduped;
+    });
     setIsChatLoading(true);
 
     try {
@@ -476,6 +995,9 @@ export default function WebApp() {
         if (ocrResponse.ok) {
           ocrResult = await ocrResponse.json();
           extractedText = ocrResult.text || '';
+          console.log('OCR successful:', { textLength: extractedText.length, engines: ocrResult?.engines });
+        } else {
+          console.error('OCR failed:', ocrResponse.status, ocrResponse.statusText);
         }
       } catch (ocrError) {
         console.error('OCR error:', ocrError);
@@ -515,13 +1037,35 @@ export default function WebApp() {
             ocrConfidence: ocrResult?.confidence || 0,
             ocrEngines: ocrResult?.engines || [],
             messageCount: messages.length,
-            sessionTitle: chatSessions.find(s => s.id === currentSessionId)?.title || 'New Chat'
-          }
+            sessionTitle: sessions[currentSessionId || '']?.title || 'New Chat'
+          },
+          userId: user?.id,
+          mode: reasoningMode ? 'reasoning' : 'standard'
         }),
       });
 
       if (!response.ok) {
-        throw new Error('Failed to get AI response');
+        const errorData = await response.json();
+        
+        // Handle authentication errors
+        if (response.status === 401 && errorData.requiresAuth) {
+          // Redirect to login page
+          window.location.href = '/auth/login';
+          return;
+        }
+        
+        // Handle plan restriction errors
+        if (response.status === 403 && errorData.upgradeRequired) {
+          setPlanRestriction({
+            show: true,
+            message: errorData.message,
+            upgradeRequired: true,
+            requiredFeature: errorData.requiredFeature
+          });
+          return;
+        }
+        
+        throw new Error(errorData.message || 'Failed to get AI response');
       }
 
       const data = await response.json();
@@ -531,14 +1075,20 @@ export default function WebApp() {
         await updateUser(data.updatedUser);
       }
       
+      const formatted = formatAIResponse(data.response);
       const aiResponse: Message = {
         id: (Date.now() + 1).toString(),
         text: data.response,
+        formattedText: formatted.text,
+        hasCode: formatted.hasCode,
+        hasLists: formatted.hasLists,
+        hasHeaders: formatted.hasHeaders,
         isUser: false,
         timestamp: new Date(),
       };
       
-      setMessages(prev => [...prev, aiResponse]);
+      // Prevent duplicate messages
+      setMessages(prev => (prev.some(m => m.id === aiResponse.id) ? prev : [...prev, aiResponse]));
       setLatestAIResponse(data.response);
       
       // Update context information if available
@@ -589,8 +1139,15 @@ export default function WebApp() {
         timestamp: new Date(),
       };
 
-      // Add both messages to the chat
-      setMessages(prev => [...prev, voiceMessage, aiMessage]);
+      // Add both messages to the chat (prevent duplicates)
+      setMessages(prev => {
+        const hasVoice = prev.some(m => m.id === voiceMessage.id);
+        const hasAI = prev.some(m => m.id === aiMessage.id);
+        const newMessages = [];
+        if (!hasVoice) newMessages.push(voiceMessage);
+        if (!hasAI) newMessages.push(aiMessage);
+        return newMessages.length > 0 ? [...prev, ...newMessages] : prev;
+      });
     }
   };
 
@@ -616,13 +1173,27 @@ export default function WebApp() {
   };
 
   const createNewChat = () => {
-    // First, save the current session's messages before creating a new one
+    // ChatGPT-style: Save current session before creating new one
     if (currentSessionId) {
-      setChatSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? { ...session, messages: messages }
-          : session
-      ));
+      const currentSession = sessions[currentSessionId];
+      if (currentSession && !isSessionEmpty(messages)) {
+        // Update current session with latest messages
+        setSessions(prev => ({
+          ...prev,
+          [currentSessionId]: {
+            ...prev[currentSessionId],
+            messages,
+            timestamp: new Date(),
+          },
+        }));
+      } else if (currentSession && isSessionEmpty(messages)) {
+        // Remove empty session
+        setSessions(prev => {
+          const updated = { ...prev };
+          delete updated[currentSessionId];
+          return updated;
+        });
+      }
     }
     
     const newSession: ChatSession = {
@@ -639,39 +1210,177 @@ export default function WebApp() {
       ],
     };
     
-    setChatSessions(prev => [newSession, ...prev]);
+    // ChatGPT-style: Add new session to Record (automatically deduplicated by key)
+    if (isSyncingRef.current) return;
+    
+    setSessions(prev => ({
+      ...prev,
+      [newSession.id]: newSession,
+    }));
+    
+    setCurrentSessionId(newSession.id);
+    isSyncingRef.current = true;
+    setMessages(newSession.messages);
+    setTimeout(() => {
+      isSyncingRef.current = false;
+    }, 200);
+  };
+
+  const selectChatSession = async (sessionId: string) => {
+    if (currentSessionId === sessionId || isSyncingRef.current) return;
+
+    // save current before switching
+    if (currentSessionId) {
+      const cur = sessions[currentSessionId];
+      if (cur && !isSessionEmpty(messages)) {
+        setSessions(prev => ({
+          ...prev,
+          [currentSessionId]: { ...prev[currentSessionId], messages, timestamp: new Date() },
+        }));
+      } else if (cur && isSessionEmpty(messages)) {
+        setSessions(prev => {
+          const copy = { ...prev };
+          delete copy[currentSessionId];
+          return copy;
+        });
+      }
+    }
+
+    const target = sessions[sessionId];
+    if (!target) return;
+
+    setCurrentSessionId(sessionId);
+
+    // Chat history loading disabled - just use cached messages
+    // Database loading removed
+
+    isSyncingRef.current = true;
+    setMessages(target.messages);
+    setTimeout(() => {
+      isSyncingRef.current = false;
+    }, 200);
+  };
+
+  const deleteChatSession = async (sessionId: string) => {
+    const sessionsCount = Object.keys(sessions).length;
+    if (sessionsCount <= 1) {
+      return alert("You must have at least one session.");
+    }
+
+    // Immediately update UI
+    setSessions(prev => {
+      const copy = { ...prev };
+      delete copy[sessionId];
+      return copy;
+    });
+
+    // Chat history disabled - no localStorage or database operations
+    // localStorage and database deletion removed
+
+    // Mark as deleted to prevent reload
+    deletedSessionsRef.current.add(sessionId);
+
+    // Pick next available session
+    const remaining = Object.values(sessions).filter(s => s.id !== sessionId);
+    const next = remaining.sort(
+      (a, b) => b.timestamp.getTime() - a.timestamp.getTime()
+    )[0];
+
+    setCurrentSessionId(next?.id || null);
+    setMessages(next?.messages || [
+      {
+        id: "1",
+        text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
+        isUser: false,
+        timestamp: new Date(),
+      },
+    ]);
+  };
+
+  const clearAllChats = async () => {
+    const sessionsArray = Object.values(sessions);
+    if (sessionsArray.length === 0) return;
+
+    // Chat history disabled - no database operations
+    // Database deletion removed
+
+    // Clear all sessions from state
+    setSessions({});
+    
+    // Chat history disabled - no localStorage operations
+    // localStorage clearing removed
+    
+    // Clear deleted sessions ref
+    deletedSessionsRef.current.clear();
+    
+    // Create a new empty session
+    const newSession: ChatSession = {
+      id: Date.now().toString(),
+      title: "New Chat",
+      timestamp: new Date(),
+      messages: [
+        {
+          id: "1",
+          text: "Hello! I'm PAATA.AI, your intelligent homework assistant. I can help you with math problems, science questions, essay writing, and much more. What would you like to work on today?",
+          isUser: false,
+          timestamp: new Date(),
+        },
+      ],
+    };
+    
+    setSessions({ [newSession.id]: newSession });
     setCurrentSessionId(newSession.id);
     setMessages(newSession.messages);
   };
 
-  const selectChatSession = (sessionId: string) => {
-    // First, save the current session's messages before switching
-    if (currentSessionId) {
-      setChatSessions(prev => prev.map(session => 
-        session.id === currentSessionId 
-          ? { ...session, messages: messages }
-          : session
-      ));
-    }
-    
-    // Find the target session
-    const targetSession = chatSessions.find(s => s.id === sessionId);
-    if (targetSession) {
-      setCurrentSessionId(sessionId);
-      setMessages(targetSession.messages);
-    }
-  };
-
-  const deleteChatSession = (sessionId: string) => {
-    if (chatSessions.length <= 1) return; // Don't delete the last session
-    
-    setChatSessions(prev => prev.filter(s => s.id !== sessionId));
-    
-    if (currentSessionId === sessionId) {
-      const remainingSessions = chatSessions.filter(s => s.id !== sessionId);
-      if (remainingSessions.length > 0) {
-        selectChatSession(remainingSessions[0].id);
+  const exportChatSession = async (sessionId: string) => {
+    if (!sessionId.startsWith('cl')) {
+      // Export from Record
+      const session = sessions[sessionId];
+      if (session) {
+        const exportData = {
+          session: {
+            id: session.id,
+            title: session.title,
+            createdAt: session.timestamp.toISOString(),
+            updatedAt: session.timestamp.toISOString(),
+          },
+          messages: session.messages.map(msg => ({
+            text: msg.text,
+            isUser: msg.isUser,
+            timestamp: msg.timestamp.toISOString(),
+          })),
+        };
+        
+        const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-${sessionId}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
       }
+      return;
+    }
+    
+    // Export from database
+    try {
+      const response = await fetch(`/api/chat/export/${sessionId}?format=json`, {
+        credentials: 'include',
+      });
+      
+      if (response.ok) {
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `chat-${sessionId}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+      }
+    } catch (error) {
+      console.error('Error exporting chat:', error);
+      alert('Failed to export chat. Please try again.');
     }
   };
 
@@ -682,130 +1391,20 @@ export default function WebApp() {
       
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <div className={`${sidebarOpen ? 'w-80' : 'w-0'} transition-all duration-300 ease-in-out bg-gray-900 flex flex-col overflow-hidden shadow-xl`}>
-          {/* Sidebar Header */}
-          <div className="pt-20 pb-4 px-4 bg-gray-900 border-b border-gray-700">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-[#612A74] rounded-xl flex items-center justify-center shadow-lg">
-                  <span className="text-white font-bold text-lg">P</span>
-                </div>
-                <div>
-                  <Typography variant="h6" color="white" className="font-bold text-lg">
-                    PAATA.AI
-                  </Typography>
-                  <Typography variant="small" color="gray" className="text-xs">
-                    Your AI Assistant
-                  </Typography>
-                </div>
-              </div>
-              <IconButton
-                variant="text"
-                color="white"
-                size="sm"
-                onClick={() => setSidebarOpen(false)}
-                className="lg:hidden hover:bg-gray-700 transition-colors"
-              >
-                <XMarkIcon className="w-5 h-5" />
-              </IconButton>
-            </div>
+        <AppSidebar sidebarOpen={sidebarOpen} setSidebarOpen={setSidebarOpen}>
+          <div className="space-y-4">
             <Button
               onClick={createNewChat}
-              className="w-full bg-[#612A74] hover:bg-[#4a1f5c] flex items-center gap-2 justify-center py-2 rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
+              className="w-full bg-gray-900 hover:bg-gray-800 flex items-center gap-2 justify-center py-2.5 rounded-lg shadow-lg transition-all duration-200 transform hover:scale-105"
             >
               <PlusIcon className="w-5 h-5" />
               <span className="font-semibold">New Chat</span>
             </Button>
+            
+            {/* Chat History disabled - removed for now */}
+            {/* Chat Sessions section removed */}
           </div>
-          
-          {/* Chat Sessions */}
-          <div className="flex-1 overflow-y-auto p-3">
-            <div className="space-y-2">
-              <Typography variant="small" color="gray" className="text-xs uppercase tracking-wider font-semibold mb-3 px-2">
-                Recent Chats
-              </Typography>
-              
-              {/* Current Session Summary */}
-              {currentSessionId && messages.length > 1 && (
-                <div className="mb-4 p-3 bg-gray-800 rounded-lg border border-gray-700">
-                  <Typography variant="small" color="gray" className="text-xs uppercase tracking-wider font-semibold mb-2 text-gray-400">
-                    Current Session
-                  </Typography>
-                  <div className="text-xs text-gray-300">
-                    <div className="mb-1">
-                      <span className="text-gray-400">Topics:</span> {generateSessionContext(messages).split('.')[1]?.replace(' Subjects discussed: ', '') || 'General discussion'}
-                    </div>
-                    <div className="mb-1">
-                      <span className="text-gray-400">Messages:</span> {messages.length}
-                    </div>
-                    <div>
-                      <span className="text-gray-400">Started:</span> {messages[0].timestamp.toLocaleDateString()}
-                    </div>
-                  </div>
-                </div>
-              )}
-              {chatSessions.length === 0 && (
-                <div className="text-center py-8">
-                  <Typography variant="small" color="gray" className="text-gray-500 text-sm">
-                    No conversations yet
-                  </Typography>
-                  <Typography variant="small" color="gray" className="text-gray-600 text-xs mt-1">
-                    Start a new chat to begin
-                  </Typography>
-                </div>
-              )}
-              {chatSessions.map((session) => (
-                <div
-                  key={session.id}
-                  className={`group flex items-center justify-between p-3 rounded-lg cursor-pointer transition-all duration-200 ${
-                    currentSessionId === session.id
-                      ? 'bg-[#612A74] text-white shadow-lg transform scale-105'
-                      : 'text-gray-300 hover:bg-gray-800 hover:text-white hover:shadow-md'
-                  }`}
-                  onClick={() => selectChatSession(session.id)}
-                >
-                  <div className="flex-1 min-w-0">
-                    <Typography
-                      variant="small"
-                      className={`font-medium truncate ${
-                        currentSessionId === session.id ? 'text-white' : 'text-gray-300'
-                      }`}
-                    >
-                      {session.title}
-                    </Typography>
-                    <Typography
-                      variant="small"
-                      className={`text-xs mt-1 ${
-                        currentSessionId === session.id ? 'text-purple-100' : 'text-gray-500'
-                      }`}
-                    >
-                      {session.timestamp.toLocaleDateString('en-US', { 
-                        month: 'short', 
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
-                    </Typography>
-                  </div>
-                  {chatSessions.length > 1 && (
-                    <IconButton
-                      variant="text"
-                      size="sm"
-                      color={currentSessionId === session.id ? "white" : "gray"}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        deleteChatSession(session.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-all duration-200 hover:bg-red-500 hover:text-white"
-                    >
-                      <TrashIcon className="w-4 h-4" />
-                    </IconButton>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        </AppSidebar>
 
         {/* Main Content */}
         <div className="flex-1 flex flex-col bg-white">
@@ -825,7 +1424,7 @@ export default function WebApp() {
               )}
               <div>
                 <Typography variant="h5" color="blue-gray" className="font-bold">
-                  {chatSessions.find(s => s.id === currentSessionId)?.title || "New Chat"}
+                  {sessions[currentSessionId || '']?.title || "New Chat"}
                 </Typography>
                 <Typography variant="small" color="gray" className="text-xs">
                   {messages.length > 1 ? `${messages.length - 1} messages` : 'Start a conversation'}
@@ -845,7 +1444,7 @@ export default function WebApp() {
             <div className="max-w-5xl mx-auto px-6 py-8">
               {messages.length === 1 && (
                 <div className="text-center mb-8">
-                  <div className="w-16 h-16 bg-[#612A74] rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+                  <div className="w-16 h-16 bg-gray-900 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
                     <span className="text-white font-bold text-2xl">P</span>
                   </div>
                   <Typography variant="h4" color="blue-gray" className="font-bold mb-2">
@@ -865,37 +1464,32 @@ export default function WebApp() {
                   >
                     <div className="flex items-start gap-3 max-w-4xl">
                       {!message.isUser && (
-                        <div className="w-8 h-8 bg-[#612A74] rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
+                        <div className="w-8 h-8 bg-gray-900 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
                           <span className="text-white font-bold text-sm">P</span>
                         </div>
                       )}
                       <div
                         className={`px-6 py-4 rounded-2xl shadow-sm transition-all duration-200 group-hover:shadow-md ${
                           message.isUser
-                            ? "bg-[#612A74] text-white ml-auto"
+                            ? "bg-gray-900 text-white ml-auto"
                             : "bg-white border border-gray-200 text-gray-900"
                         }`}
                       >
-                        <Typography
-                          variant="paragraph"
+                        <div
                           className={`leading-relaxed ${
                             message.isUser ? "text-white" : "text-gray-900"
                           }`}
                         >
                           {message.isUser ? (
-                            message.text
+                            <ScientificRenderer content={message.text} type="auto" />
                           ) : (
-                            <span 
-                              dangerouslySetInnerHTML={{ 
-                                __html: formatTextWithHTML(message.text) 
-                              }} 
-                            />
+                            <ScientificRenderer content={message.formattedText || formatTextWithHTML(message.text)} type="auto" />
                           )}
-                        </Typography>
+                        </div>
                         <div className="mt-3 flex items-center justify-between">
                           <span
                             className={`text-xs ${
-                              message.isUser ? "text-purple-100" : "text-gray-500"
+                              message.isUser ? "text-gray-100" : "text-gray-500"
                             }`}
                           >
                             {message.timestamp.toLocaleTimeString('en-US', { 
@@ -924,15 +1518,15 @@ export default function WebApp() {
                 {isChatLoading && (
                   <div className="flex justify-start">
                     <div className="flex items-start gap-3">
-                      <div className="w-8 h-8 bg-[#612A74] rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
+                      <div className="w-8 h-8 bg-gray-900 rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
                         <span className="text-white font-bold text-sm">P</span>
                       </div>
                       <div className="bg-white border border-gray-200 rounded-2xl px-6 py-4 shadow-sm">
                         <div className="flex items-center gap-3">
                           <div className="flex space-x-1">
-                            <div className="w-2 h-2 bg-[#612A74] rounded-full animate-bounce"></div>
-                            <div className="w-2 h-2 bg-[#612A74] rounded-full animate-bounce" style={{ animationDelay: "0.1s" }}></div>
-                            <div className="w-2 h-2 bg-[#612A74] rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
+                            <div className="w-2 h-2 bg-gray-900 rounded-full animate-bounce"></div>
+                            <div className="w-2 h-2 bg-gray-900 rounded-full animate-bounce" style={{ animationDelay: "0.1s" }}></div>
+                            <div className="w-2 h-2 bg-gray-900 rounded-full animate-bounce" style={{ animationDelay: "0.2s" }}></div>
                           </div>
                           <Typography variant="small" color="gray" className="font-medium">
                             PAATA.AI is thinking...
@@ -1020,7 +1614,94 @@ export default function WebApp() {
 
           <div className="bg-white border-t border-gray-200 px-6 py-6 shadow-lg">
             <div className="max-w-5xl mx-auto">
-              {/* Image Preview - Above Input Field */}
+              {/* Advanced Reasoning Mode Toggle */}
+              <div className="mb-3 flex items-center justify-between">
+                <button
+                  onClick={() => setReasoningMode(!reasoningMode)}
+                  className={`flex items-center gap-2 px-4 py-2 rounded-lg border transition-all duration-200 ${
+                    reasoningMode
+                      ? 'bg-gray-50 border-gray-300 text-gray-900 shadow-sm'
+                      : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                  }`}
+                  disabled={isChatLoading}
+                >
+                  <svg 
+                    xmlns="http://www.w3.org/2000/svg" 
+                    fill="none" 
+                    viewBox="0 0 24 24" 
+                    strokeWidth={1.5} 
+                    stroke="currentColor" 
+                    className={`w-5 h-5 ${reasoningMode ? 'text-gray-900' : 'text-gray-500'}`}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09zM18.259 8.715L18 9.75l-.259-1.035a3.375 3.375 0 00-2.455-2.456L14.25 6l1.036-.259a3.375 3.375 0 002.455-2.456L18 2.25l.259 1.035a3.375 3.375 0 002.456 2.456L21.75 6l-1.035.259a3.375 3.375 0 00-2.456 2.456zM16.894 20.567L16.5 21.75l-.394-1.183a2.25 2.25 0 00-1.423-1.423L13.5 18.75l1.183-.394a2.25 2.25 0 001.423-1.423l.394-1.183.394 1.183a2.25 2.25 0 001.423 1.423l1.183.394-1.183.394a2.25 2.25 0 00-1.423 1.423z" />
+                  </svg>
+                  <span className={`text-sm font-medium ${reasoningMode ? 'text-gray-900' : 'text-gray-700'}`}>
+                    {reasoningMode ? 'Research Mode ON' : 'Research Mode'}
+                  </span>
+                  <div className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-gray-900 focus:ring-offset-2 ${
+                    reasoningMode ? 'bg-gray-900' : 'bg-gray-300'
+                  }`}>
+                    <span
+                      className={`${reasoningMode ? 'translate-x-4' : 'translate-x-0'} pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out`}
+                    />
+                  </div>
+                </button>
+                {reasoningMode && (
+                  <div className="text-xs text-gray-600 bg-gray-50 px-3 py-1 rounded-md border border-gray-200">
+                    AI will research online and provide comprehensive, detailed answers like Perplexity's research mode
+                  </div>
+                )}
+              </div>
+              
+              {/* PDF Preview - Above Input Field */}
+              {selectedPDF && (
+                <div className={`mx-6 mb-4 p-3 rounded-lg flex items-center justify-between ${
+                  pdfExtractionError 
+                    ? 'bg-yellow-50 border border-yellow-200' 
+                    : 'bg-blue-50 border border-blue-200'
+                }`}>
+                  <div className="flex items-center gap-3 flex-1 min-w-0">
+                    <DocumentIcon className={`w-5 h-5 flex-shrink-0 ${
+                      pdfExtractionError ? 'text-yellow-600' : 'text-blue-600'
+                    }`} />
+                    <div className="flex-1 min-w-0">
+                      <p className={`text-sm font-medium truncate ${
+                        pdfExtractionError ? 'text-yellow-900' : 'text-blue-900'
+                      }`}>
+                        {selectedPDF.name}
+                      </p>
+                      {isExtractingPDF ? (
+                        <p className="text-xs text-blue-600">Extracting text...</p>
+                      ) : pdfExtractionError ? (
+                        <div>
+                          <p className="text-xs text-yellow-700 font-medium">⚠️ Extraction failed</p>
+                          <p className="text-xs text-yellow-600 mt-1 line-clamp-2">
+                            {pdfExtractionError.split('\n')[0]}
+                          </p>
+                        </div>
+                      ) : pdfText ? (
+                        <p className="text-xs text-blue-600">
+                          ✓ {pdfText.length.toLocaleString()} characters extracted
+                        </p>
+                      ) : (
+                        <p className="text-xs text-blue-600">Ready to analyze</p>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={handlePDFRemove}
+                    className={`flex-shrink-0 ml-2 ${
+                      pdfExtractionError 
+                        ? 'text-yellow-600 hover:text-yellow-800' 
+                        : 'text-blue-600 hover:text-blue-800'
+                    }`}
+                    disabled={isExtractingPDF}
+                    title="Remove PDF"
+                  >
+                    <XMarkIcon className="w-5 h-5" />
+                  </button>
+                </div>
+              )}
               {selectedImage && imagePreview && imagePreview.trim() !== "" && (
                 <div className="mb-4">
                   <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-200">
@@ -1057,7 +1738,7 @@ export default function WebApp() {
                     onChange={(e) => setInputText(e.target.value)}
                     onKeyPress={handleKeyPress}
                     placeholder="Ask me anything about your homework..."
-                    className="w-full px-4 sm:px-6 py-3 sm:py-4 pr-16 sm:pr-20 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-[#612A74] focus:border-transparent shadow-sm transition-all duration-200 hover:shadow-md text-sm sm:text-base"
+                    className="w-full px-4 sm:px-6 py-3 sm:py-4 pr-16 sm:pr-20 border border-gray-300 rounded-2xl resize-none focus:outline-none focus:ring-2 focus:ring-gray-900 focus:border-transparent shadow-sm transition-all duration-200 hover:shadow-md text-sm sm:text-base"
                     rows={1}
                     style={{
                       minHeight: "48px",
@@ -1078,6 +1759,13 @@ export default function WebApp() {
                       disabled={isChatLoading || !canUseFeature(user?.plan || 'Basic', 'imageAnalysis')}
                       planRestricted={!canUseFeature(user?.plan || 'Basic', 'imageAnalysis')}
                     />
+                    <ChatPDFUpload
+                      onPDFSelect={handlePDFSelect}
+                      onPDFRemove={handlePDFRemove}
+                      selectedPDF={selectedPDF}
+                      disabled={isChatLoading || isExtractingPDF}
+                      planRestricted={false}
+                    />
                     <VoiceRecorder 
                       onRecordingComplete={handleVoiceRecordingComplete}
                       onTranscriptionComplete={handleVoiceTranscriptionComplete}
@@ -1092,6 +1780,7 @@ export default function WebApp() {
                       }))}
                       sessionContext={generateSessionContext(messages)}
                       userId={user?.id}
+                      mode={reasoningMode ? 'reasoning' : 'standard'}
                     />
                     {latestAIResponse && (
                       <SpeechSynthesis 
@@ -1107,7 +1796,7 @@ export default function WebApp() {
                 <Button
                   onClick={handleSendMessage}
                   disabled={!inputText.trim() || isChatLoading}
-                  className="bg-[#612A74] hover:bg-[#4a1f5c] disabled:opacity-50 disabled:cursor-not-allowed rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-4 h-[48px] sm:h-[56px] shadow-lg transition-all duration-200 transform hover:scale-105 disabled:transform-none"
+                  className="bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl sm:rounded-2xl px-3 sm:px-6 py-2 sm:py-4 h-[48px] sm:h-[56px] shadow-lg transition-all duration-200 transform hover:scale-105 disabled:transform-none"
                 >
                   <PaperAirplaneIcon className="w-4 h-4 sm:w-5 sm:h-5" />
                 </Button>

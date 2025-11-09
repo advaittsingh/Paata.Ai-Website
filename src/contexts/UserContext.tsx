@@ -1,6 +1,7 @@
 "use client";
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { setUserContext, clearUserContext } from '@/lib/error-logging';
 
 interface User {
   id: string;
@@ -68,29 +69,80 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Load user data from localStorage on mount
-    if (typeof window !== 'undefined') {
-      try {
-        const savedUser = localStorage.getItem('paata_user');
-        if (savedUser) {
-          const parsedUser = JSON.parse(savedUser);
-          // Validate user object structure
-          if (parsedUser && typeof parsedUser === 'object' && parsedUser.id && parsedUser.email) {
-            setUser(parsedUser);
+    // Verify authentication on mount using cookie
+    const verifyAuth = async () => {
+      if (typeof window !== 'undefined') {
+        try {
+          // First, try to load from localStorage for faster initial render
+          const savedUser = localStorage.getItem('paata_user');
+          if (savedUser) {
+            try {
+              const parsedUser = JSON.parse(savedUser);
+              if (parsedUser && typeof parsedUser === 'object' && parsedUser.id && parsedUser.email) {
+                setUser(parsedUser); // Set immediately for faster UI
+              }
+            } catch (e) {
+              // Invalid localStorage data, clear it
+              localStorage.removeItem('paata_user');
+            }
+          }
+
+          // Verify with server (cookie-based auth)
+          let response = await fetch('/api/auth/verify', {
+            method: 'GET',
+            credentials: 'include', // Include cookies
+          });
+
+          // If 401, try to refresh token
+          if (response.status === 401) {
+            const { refreshToken } = await import('@/utils/tokenRefresh');
+            const refreshResult = await refreshToken();
+            
+            if (refreshResult.success) {
+              // Retry verification
+              response = await fetch('/api/auth/verify', {
+                method: 'GET',
+                credentials: 'include',
+              });
+            }
+          }
+
+          if (response.ok) {
+            const data = await response.json();
+            if (data.authenticated && data.user) {
+              setUser(data.user);
+              // Set user context for error logging
+              setUserContext({
+                id: data.user.id,
+                email: data.user.email,
+              });
+              // Cache in localStorage for faster subsequent loads
+              localStorage.setItem('paata_user', JSON.stringify(data.user));
+            } else {
+              // Not authenticated, clear any cached data
+              setUser(null);
+              clearUserContext();
+              localStorage.removeItem('paata_user');
+            }
           } else {
-            console.warn('Invalid user data in localStorage, clearing...');
+            // Auth verification failed, clear cached data
+            setUser(null);
+            clearUserContext();
             localStorage.removeItem('paata_user');
           }
+        } catch (error) {
+          console.error('Error verifying auth:', error);
+          // On error, keep localStorage data if it exists (for offline scenarios)
+          // but still mark as loaded
+        } finally {
+          setIsLoading(false);
         }
-      } catch (error) {
-        console.error('Error loading user data:', error);
-        localStorage.removeItem('paata_user');
-      } finally {
+      } else {
         setIsLoading(false);
       }
-    } else {
-      setIsLoading(false);
-    }
+    };
+
+    verifyAuth();
   }, []);
 
   const updateUser = async (updates: Partial<User>) => {
@@ -131,17 +183,46 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       localStorage.removeItem('paata_user');
       
+      // Get CSRF token
+      let csrfToken: string | null = null;
+      try {
+        const csrfResponse = await fetch('/api/csrf-token', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (csrfResponse.ok) {
+          const csrfData = await csrfResponse.json();
+          csrfToken = csrfData.csrfToken;
+        }
+      } catch (e) {
+        // CSRF token fetch failed, continue without it (graceful degradation)
+        console.warn('Failed to fetch CSRF token:', e);
+      }
+      
       const response = await fetch('/api/auth/login', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(csrfToken && { 'X-CSRF-Token': csrfToken }),
         },
-        body: JSON.stringify({ email, password }),
+        credentials: 'include', // Include cookies
+        body: JSON.stringify({ 
+          email, 
+          password,
+          ...(csrfToken && { csrfToken }),
+        }),
       });
 
       if (response.ok) {
-        const userData = await response.json();
+        const data = await response.json();
+        // Response format: { user: {...}, message: "..." }
+        const userData = data.user || data; // Support both formats for backward compatibility
         setUser(userData);
+        // Set user context for error logging
+        setUserContext({
+          id: userData.id,
+          email: userData.email,
+        });
         localStorage.setItem('paata_user', JSON.stringify(userData));
         return { success: true, user: userData };
       } else {
@@ -156,17 +237,45 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signup = async (userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) => {
     try {
+      // Get CSRF token
+      let csrfToken: string | null = null;
+      try {
+        const csrfResponse = await fetch('/api/csrf-token', {
+          method: 'GET',
+          credentials: 'include',
+        });
+        if (csrfResponse.ok) {
+          const csrfData = await csrfResponse.json();
+          csrfToken = csrfData.csrfToken;
+        }
+      } catch (e) {
+        // CSRF token fetch failed, continue without it (graceful degradation)
+        console.warn('Failed to fetch CSRF token:', e);
+      }
+      
       const response = await fetch('/api/auth/signup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          ...(csrfToken && { 'X-CSRF-Token': csrfToken }),
         },
-        body: JSON.stringify(userData),
+        credentials: 'include', // Include cookies
+        body: JSON.stringify({
+          ...userData,
+          ...(csrfToken && { csrfToken }),
+        }),
       });
 
       if (response.ok) {
-        const newUser = await response.json();
+        const data = await response.json();
+        // Response format: { user: {...}, message: "..." }
+        const newUser = data.user || data; // Support both formats for backward compatibility
         setUser(newUser);
+        // Set user context for error logging
+        setUserContext({
+          id: newUser.id,
+          email: newUser.email,
+        });
         localStorage.setItem('paata_user', JSON.stringify(newUser));
         return { success: true, user: newUser };
       } else {
@@ -179,9 +288,22 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const logout = () => {
-    setUser(null);
-    localStorage.removeItem('paata_user');
+  const logout = async () => {
+    try {
+      // Call logout API to clear server-side session
+      await fetch('/api/auth/logout', {
+        method: 'POST',
+        credentials: 'include', // Include cookies
+      });
+    } catch (error) {
+      console.error('Logout API error:', error);
+      // Continue with client-side cleanup even if API fails
+    } finally {
+      // Clear client-side state
+      setUser(null);
+      clearUserContext();
+      localStorage.removeItem('paata_user');
+    }
   };
 
   const value: UserContextType = {

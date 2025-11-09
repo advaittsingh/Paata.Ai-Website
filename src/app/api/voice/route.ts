@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import { contextManager } from '@/utils/contextManager';
 import { detectLanguage, formatLanguagePrompt, cleanMessageForLanguage } from '@/utils/languageDetector';
 import { PrismaDatabase } from '@/lib/prisma-database';
+import { gatherResearchData } from '@/utils/webSearch';
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
     const conversationHistory = JSON.parse(formData.get('conversationHistory') as string || '[]');
     const sessionContext = formData.get('sessionContext') as string || '';
     const userId = formData.get('userId') as string;
+    const mode = formData.get('mode') as string || 'standard';
 
     if (!audioFile) {
       return NextResponse.json(
@@ -73,7 +75,8 @@ export async function POST(request: NextRequest) {
       sessionContext,
       contextSummary,
       relatedContexts,
-      primaryContext
+      primaryContext,
+      mode
     );
 
     // Step 5: Update user stats if user is authenticated
@@ -200,7 +203,8 @@ async function generateAIResponse(
   sessionContext: string,
   contextSummary: string,
   relatedContexts: any[],
-  primaryContext: any[]
+  primaryContext: any[],
+  mode: string = 'standard'
 ): Promise<string> {
   try {
     // Initialize OpenAI client
@@ -213,11 +217,60 @@ async function generateAIResponse(
     const cleanedText = cleanMessageForLanguage(transcribedText, languageInfo);
     const languagePrompt = formatLanguagePrompt(languageInfo, transcribedText);
 
-    // Build conversation messages for GPT
-    const messages = [
-      {
-        role: "system" as const,
-        content: `You are PAATA.AI, an intelligent homework assistant designed to help students learn and understand academic concepts. 
+    // In advanced reasoning mode, gather web research data
+    // Add timeout to prevent blocking for too long
+    let researchData = '';
+    if (mode === 'reasoning' || mode === 'explain_why') {
+      try {
+        console.log('🔍 Voice: Advanced reasoning mode: Gathering research data...');
+        const researchPromise = gatherResearchData(cleanedText, 5);
+        const researchTimeout = new Promise<string>((resolve) => 
+          setTimeout(() => resolve(''), 8000) // 8 second timeout
+        );
+        researchData = await Promise.race([researchPromise, researchTimeout]);
+        console.log('📚 Voice: Research data gathered:', researchData ? 'Yes' : 'No');
+      } catch (error) {
+        console.error('Voice: Research data gathering error:', error);
+        // Continue without research data if it fails
+      }
+    }
+    
+    // Build conversation messages for GPT with mode-specific prompts
+    const systemPrompt = mode === 'reasoning' || mode === 'explain_why'
+      ? `You are PAATA.AI operating in RESEARCH MODE - an advanced research and reasoning assistant.
+
+Your capabilities in this mode:
+1. **Deep Research**: Access to the latest information and academic research
+2. **Comprehensive Analysis**: Provide in-depth, well-researched explanations
+3. **Critical Thinking**: Analyze problems from multiple angles and perspectives
+4. **Academic Context**: Reference theories, research, and scholarly knowledge
+5. **Detailed Reasoning**: Show step-by-step thought processes
+6. **Evidence-Based**: Support explanations with facts, data, and examples
+7. **Comprehensive Coverage**: Leave no stone unturned in explaining concepts
+8. **Voice-Optimized**: Especially clear for spoken responses
+
+RESEARCH MODE PROTOCOL:
+- Synthesize information from multiple sources when available
+- Provide comprehensive, well-structured responses suitable for voice
+- Break down complex topics systematically
+- Include relevant historical context, scientific principles, or academic theories
+- Use analogies, examples, and case studies to illustrate concepts
+- Explain both the "what" and "why" in detail
+- Connect current topic to broader academic knowledge
+- Provide actionable insights and practical applications
+
+RESPONSE FORMAT FOR VOICE:
+- Start with a brief overview or summary
+- Provide detailed explanation with reasoning
+- Use clear structure that works well when spoken aloud
+- Include relevant facts, data, or research findings
+- End with key takeaways or synthesis
+- Be thorough but clear and accessible
+
+${researchData ? `\n\nRESEARCH DATA AVAILABLE:\n${researchData}` : ''}
+
+You have access to web-researched information when available. Use this information to provide authoritative, comprehensive answers that demonstrate deep understanding.`
+      : `You are PAATA.AI, an intelligent homework assistant designed to help students learn and understand academic concepts. 
 
 Your role is to:
 1. Provide clear, educational explanations
@@ -267,7 +320,13 @@ CONVERSATION AWARENESS: You have access to the conversation history and can:
 - Avoid repeating information already covered
 - Be especially clear and detailed since this is a voice input
 
-Current conversation context:${sessionContext ? `\n\nSession Summary: ${sessionContext}` : ''}`
+Current conversation context:${sessionContext ? `\n\nSession Summary: ${sessionContext}` : ''}`;
+
+    // Build conversation messages for GPT
+    const messages = [
+      {
+        role: "system" as const,
+        content: systemPrompt
       }
     ];
 
@@ -290,10 +349,27 @@ Current conversation context:${sessionContext ? `\n\nSession Summary: ${sessionC
       messages[messages.length - 1].content += contextInfo;
     }
 
-    // Add the current voice input
-    messages.push({
-      role: "user" as const,
-      content: `Current student voice input: "${cleanedText}"
+    // Add reasoning-specific prompt if mode is reasoning
+    if (mode === 'reasoning' || mode === 'explain_why') {
+      const reasoningPrompt = `Please provide a detailed "WHY" explanation that:
+1. Explains the underlying principles
+2. Shows the step-by-step reasoning
+3. Connects to related concepts
+4. Helps build deep understanding
+
+Current student voice question: ${cleanedText}
+
+Provide an explanation that helps the student understand not just WHAT the answer is, but WHY it is correct and how to think through similar problems. Be especially clear and well-structured since the student will likely hear this response.`;
+      
+      messages.push({
+        role: "user" as const,
+        content: reasoningPrompt
+      });
+    } else {
+      // Add the current voice input for standard mode
+      messages.push({
+        role: "user" as const,
+        content: `Current student voice input: "${cleanedText}"
 
 Please provide a helpful, educational response that:
 1. Builds upon our previous conversation naturally
@@ -304,13 +380,18 @@ Please provide a helpful, educational response that:
 6. Provides comprehensive explanations
 7. Responds directly to the question without mentioning topic changes or transitions
 8. Never says phrases like "shifting gears", "changing topics", or "moving from X to Y"${languagePrompt ? `\n\n${languagePrompt}` : ''}`
-    });
+      });
+    }
 
+    // In reasoning mode, increase tokens for deeper analysis
+    const isAdvancedReasoning = mode === 'reasoning' || mode === 'explain_why';
+    const maxTokens = isAdvancedReasoning ? 2000 : 1000; // More tokens for comprehensive answers
+    
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: messages,
-      max_tokens: 1000,
-      temperature: 0.7,
+      max_tokens: maxTokens,
+      temperature: isAdvancedReasoning ? 0.6 : 0.7, // Lower temperature for more focused reasoning
     });
 
     return completion.choices[0]?.message?.content || 'I apologize, but I could not generate a response. Please try again.';

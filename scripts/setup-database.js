@@ -99,8 +99,8 @@ async function setupDatabase() {
       await prisma.user.create({
         data: {
           ...userData,
-          preferences: userData.preferences,
-          stats: userData.stats,
+          preferences: JSON.stringify(userData.preferences),
+          stats: JSON.stringify(userData.stats),
         }
       });
     }

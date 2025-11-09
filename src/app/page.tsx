@@ -1,12 +1,7 @@
-// components
-import { Navbar, Footer } from "@/components";
+"use client";
 
-// sections
-import Hero from "./hero";
-import Feature from "./feature";
-import MobileConvenience from "./mobile-convenience";
-import VideoIntro from "./video-intro";
-import Faqs from "./faqs";
+// components
+import { Navbar, Footer, Hero, Feature, MobileConvenience, VideoIntro, LearningMaterials } from "@/components";
 
 export default function Campaign() {
   return (
@@ -16,8 +11,14 @@ export default function Campaign() {
       <Feature />
       <MobileConvenience />
       <VideoIntro />
-      <Faqs />
+      
+      {/* Learning Materials Section */}
+      <LearningMaterials />
+      
       <Footer />
     </>
   );
 }
+
+
+

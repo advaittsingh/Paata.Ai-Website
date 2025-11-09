@@ -218,6 +218,11 @@ class VercelHybridOCRService {
   }
 
   detectImageType(imageBuffer) {
+    // Check for PDF
+    const header = imageBuffer.toString('utf8', 0, 4);
+    if (header === '%PDF') return 'application/pdf';
+    
+    // Check for images
     if (imageBuffer[0] === 0xFF && imageBuffer[1] === 0xD8) return 'image/jpeg';
     if (imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50) return 'image/png';
     if (imageBuffer[0] === 0x47 && imageBuffer[1] === 0x49) return 'image/gif';

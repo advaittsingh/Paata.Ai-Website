@@ -1,12 +1,64 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { PrismaDatabase } from '@/lib/prisma-database';
+import { hashPassword, generateToken } from '@/lib/auth-utils';
+import { checkRateLimit } from '@/lib/rate-limit';
+import { extractCsrfToken, verifyCsrfToken } from '@/lib/csrf';
 
 export async function POST(request: NextRequest) {
   try {
-    const userData = await request.json();
+    // Extract CSRF token and request body
+    const { token: csrfToken, body: requestBody } = await extractCsrfToken(request);
+    
+    // Verify CSRF token (only in production or if explicitly enabled)
+    if (process.env.ENABLE_CSRF_PROTECTION === 'true' || process.env.NODE_ENV === 'production') {
+      if (!csrfToken) {
+        return NextResponse.json(
+          { error: 'CSRF token is required' },
+          { status: 403 }
+        );
+      }
+      
+      const isValid = await verifyCsrfToken(request, csrfToken);
+      if (!isValid) {
+        return NextResponse.json(
+          { error: 'Invalid CSRF token' },
+          { status: 403 }
+        );
+      }
+    }
+
+    // Check rate limit for signup
+    const rateLimit = checkRateLimit(request, 'signup');
+    if (!rateLimit.allowed) {
+      return NextResponse.json(
+        { 
+          error: 'Too many signup attempts. Please try again later.',
+          retryAfter: rateLimit.retryAfter
+        },
+        { 
+          status: 429,
+          headers: {
+            'Retry-After': rateLimit.retryAfter?.toString() || '900'
+          }
+        }
+      );
+    }
+
+    const userData = requestBody;
 
     if (!userData.email || !userData.password || !userData.firstName || !userData.lastName) {
       return NextResponse.json({ error: 'Required fields are missing' }, { status: 400 });
+    }
+
+    // Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(userData.email)) {
+      return NextResponse.json({ error: 'Invalid email format' }, { status: 400 });
+    }
+
+    // Validate password strength (minimum 6 characters)
+    if (userData.password.length < 6) {
+      return NextResponse.json({ error: 'Password must be at least 6 characters long' }, { status: 400 });
     }
 
     // Check if user already exists
@@ -15,12 +67,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'User already exists' }, { status: 400 });
     }
 
+    // Hash password
+    const hashedPassword = await hashPassword(userData.password);
+
+    // Generate email verification token
+    const crypto = require('crypto');
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    const verificationExpiry = new Date();
+    verificationExpiry.setHours(verificationExpiry.getHours() + 24); // 24 hours expiry
+
     // Create new user with default values
     const newUser = await PrismaDatabase.createUser({
       firstName: userData.firstName,
       lastName: userData.lastName,
       email: userData.email,
-      password: userData.password, // In production, hash this
+      password: hashedPassword,
       phone: userData.phone || '',
       bio: userData.bio || 'New PAATA.AI user',
       location: userData.location || '',
@@ -41,6 +102,8 @@ export async function POST(request: NextRequest) {
           difficultyLevel: 'adaptive',
           learningStyle: 'mixed',
           subjectFocus: [],
+          class: userData.preferences?.learning?.class || userData.class || '1',
+          board: userData.preferences?.learning?.board || userData.board || 'CBSE',
         },
       },
       stats: {
@@ -52,13 +115,71 @@ export async function POST(request: NextRequest) {
         averageSessionTime: '0m 0s',
         streakDays: 0,
       },
+      emailVerified: false,
+      emailVerificationToken: verificationToken,
+      emailVerificationExpiry: verificationExpiry,
     });
+
+    // Send verification email (optional - don't fail signup if email fails)
+    try {
+      const verificationLink = `${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/auth/verify-email?token=${verificationToken}`;
+      const { sendVerificationEmail } = await import('@/lib/email-service');
+      await sendVerificationEmail(newUser.email, verificationLink);
+    } catch (emailError) {
+      console.warn('Failed to send verification email:', emailError);
+      // Don't fail signup if email fails - user can request verification later
+    }
+
+    // Generate JWT token
+    const token = generateToken({
+      userId: newUser.id,
+      email: newUser.email,
+    });
+
+    // Generate refresh token
+    const { generateRefreshToken, storeRefreshToken } = await import('@/lib/refresh-tokens');
+    const refreshToken = generateRefreshToken();
+    await storeRefreshToken(newUser.id, refreshToken);
 
     // Remove password from response
     const { password, ...userWithoutPassword } = newUser;
-    return NextResponse.json(userWithoutPassword, { status: 201 });
-  } catch (error) {
+
+    // Create response with user data
+    const response = NextResponse.json(
+      { 
+        user: userWithoutPassword,
+        message: 'Account created successfully',
+        refreshToken: refreshToken, // Include refresh token in response
+      },
+      { status: 201 }
+    );
+
+    // Set HTTP-only cookie with token
+    response.cookies.set('auth_token', token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24 * 7, // 7 days
+      path: '/',
+    });
+
+    // Store refresh token in HTTP-only cookie (30 days)
+    response.cookies.set('refresh_token', refreshToken, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      maxAge: 60 * 60 * 24 * 30, // 30 days
+      path: '/',
+    });
+
+    return response;
+  } catch (error: any) {
     console.error('Signup error:', error);
-    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+    console.error('Error details:', error?.message, error?.stack);
+    // Return more specific error message in development
+    const errorMessage = process.env.NODE_ENV === 'development' 
+      ? (error?.message || 'Internal server error')
+      : 'Internal server error';
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }
