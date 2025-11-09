@@ -83,43 +83,38 @@ function createPrismaClient() {
   return client;
 }
 
-let prismaInstance: ReturnType<typeof createPrismaClient>;
-
-if (process.env.NODE_ENV === 'production') {
-  // In production, reuse cached instance
-  prismaInstance = globalForPrisma.prisma ?? createPrismaClient();
-  globalForPrisma.prisma = prismaInstance;
-} else {
-  // In development, always verify and recreate if needed
-  // Force check on every import to catch stale cached instances
-  const cachedClient = globalForPrisma.prisma;
-  const shouldRecreate = !cachedClient || !hasBoardModel(cachedClient);
-  
-  if (shouldRecreate) {
-    // Clear old instance if it exists
-    if (cachedClient) {
-      console.warn('[Prisma] Clearing cached client (missing Board model or invalid)...');
-      try {
-        cachedClient.$disconnect().catch(() => {});
-      } catch {
-        // Ignore disconnect errors
-      }
-      globalForPrisma.prisma = undefined;
-    }
-    
-    // Create fresh instance
-    console.log('[Prisma] Creating new Prisma client instance...');
-    prismaInstance = createPrismaClient();
-    console.log('[Prisma] ✓ Board model confirmed in new Prisma client');
-    globalForPrisma.prisma = prismaInstance;
-  } else {
-    // Cached instance is valid, reuse it
-    console.log('[Prisma] Reusing cached Prisma client (Board model verified)');
-    prismaInstance = cachedClient;
+// Lazy initialization - only create client when actually used (not during build)
+function getPrismaClient(): ReturnType<typeof createPrismaClient> {
+  // Check if we already have a cached instance
+  if (globalForPrisma.prisma) {
+    return globalForPrisma.prisma;
   }
+
+  // Check if DATABASE_URL is available (might not be during build)
+  const databaseUrl = process.env.PRISMA_DATABASE_URL || process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    // During build, DATABASE_URL might not be available
+    // This is okay - we'll create the client when it's actually needed at runtime
+    throw new Error('DATABASE_URL or PRISMA_DATABASE_URL is required. Make sure it is set in your environment variables.');
+  }
+
+  // Create new instance
+  const client = createPrismaClient();
+  globalForPrisma.prisma = client;
+  return client;
 }
 
-export const prisma = prismaInstance;
+// Export a proxy that lazily initializes the client only when methods are called
+export const prisma = new Proxy({} as ReturnType<typeof createPrismaClient>, {
+  get(_target, prop) {
+    const client = getPrismaClient();
+    const value = (client as any)[prop];
+    if (typeof value === 'function') {
+      return value.bind(client);
+    }
+    return value;
+  },
+});
 
 // User interface matching your existing structure
 export interface User {
