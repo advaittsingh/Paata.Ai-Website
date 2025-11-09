@@ -29,6 +29,7 @@
     "@heroicons/react": "2.0.18",
     "@material-tailwind/react": "^2.1.0",
     "@prisma/client": "^6.16.3",
+    "@prisma/extension-accelerate": "^2.0.2",
     "@sendgrid/mail": "^8.1.6",
     "@types/dompurify": "^3.0.5",
     "@types/multer": "^2.0.0",

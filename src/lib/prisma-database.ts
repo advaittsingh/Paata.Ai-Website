@@ -1,12 +1,13 @@
 import { PrismaClient } from '@prisma/client';
+import { withAccelerate } from '@prisma/extension-accelerate';
 
 // Prevent multiple instances of Prisma Client in development
 const globalForPrisma = globalThis as unknown as {
-  prisma: PrismaClient | undefined;
+  prisma: ReturnType<typeof createPrismaClient> | undefined;
 };
 
 // Helper to check if Prisma client has Board model
-function hasBoardModel(client: PrismaClient): boolean {
+function hasBoardModel(client: any): boolean {
   try {
     // Check if board property exists and has Prisma methods (like findMany)
     const boardModel = (client as any).board;
@@ -20,11 +21,19 @@ function hasBoardModel(client: PrismaClient): boolean {
   }
 }
 
-// Create or reuse Prisma client instance
-function createPrismaClient(): PrismaClient {
-  const client = new PrismaClient({
+// Create or reuse Prisma client instance with Accelerate
+function createPrismaClient() {
+  // Check if we're using Prisma Accelerate (connection string starts with prisma+)
+  const isUsingAccelerate = process.env.DATABASE_URL?.startsWith('prisma+');
+  
+  const baseClient = new PrismaClient({
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   });
+  
+  // Extend with Accelerate if using Accelerate connection string
+  const client = isUsingAccelerate 
+    ? baseClient.$extends(withAccelerate())
+    : baseClient;
   
   // Verify Board model exists immediately after creation
   if (!hasBoardModel(client)) {
@@ -34,10 +43,14 @@ function createPrismaClient(): PrismaClient {
     throw new Error('Prisma client missing Board model. Run: npx prisma generate');
   }
   
+  if (isUsingAccelerate) {
+    console.log('[Prisma] ✓ Prisma Accelerate enabled');
+  }
+  
   return client;
 }
 
-let prismaInstance: PrismaClient;
+let prismaInstance: ReturnType<typeof createPrismaClient>;
 
 if (process.env.NODE_ENV === 'production') {
   // In production, reuse cached instance
