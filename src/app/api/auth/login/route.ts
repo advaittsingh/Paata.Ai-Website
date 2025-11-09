@@ -11,8 +11,10 @@ export async function POST(request: NextRequest) {
     const { token: csrfToken, body: requestBody } = await extractCsrfToken(request);
     
     // Verify CSRF token (only in production or if explicitly enabled)
-    if (process.env.ENABLE_CSRF_PROTECTION === 'true' || process.env.NODE_ENV === 'production') {
+    // Allow disabling CSRF for debugging by setting ENABLE_CSRF_PROTECTION to 'false'
+    if (process.env.ENABLE_CSRF_PROTECTION !== 'false' && (process.env.ENABLE_CSRF_PROTECTION === 'true' || process.env.NODE_ENV === 'production')) {
       if (!csrfToken) {
+        console.error('[Login] CSRF token missing');
         return NextResponse.json(
           { error: 'CSRF token is required' },
           { status: 403 }
@@ -21,11 +23,15 @@ export async function POST(request: NextRequest) {
       
       const isValid = await verifyCsrfToken(request, csrfToken);
       if (!isValid) {
+        console.error('[Login] CSRF token validation failed');
         return NextResponse.json(
           { error: 'Invalid CSRF token' },
           { status: 403 }
         );
       }
+      console.log('[Login] CSRF token validated successfully');
+    } else {
+      console.log('[Login] CSRF protection disabled');
     }
 
     // Check rate limit
@@ -132,7 +138,7 @@ export async function POST(request: NextRequest) {
     response.cookies.set('auth_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // Changed from 'strict' to 'lax' for better Vercel compatibility
       maxAge: 60 * 60 * 24 * 7, // 7 days
       path: '/',
     });
@@ -141,7 +147,7 @@ export async function POST(request: NextRequest) {
     response.cookies.set('refresh_token', refreshToken, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // Changed from 'strict' to 'lax' for better Vercel compatibility
       maxAge: 60 * 60 * 24 * 30, // 30 days
       path: '/',
     });

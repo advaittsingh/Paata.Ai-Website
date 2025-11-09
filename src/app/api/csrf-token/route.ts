@@ -14,10 +14,11 @@ export async function GET(request: NextRequest) {
     const response = NextResponse.json({ csrfToken: token });
 
     // Set CSRF token in HTTP-only cookie
+    // Use 'lax' instead of 'strict' for better compatibility with Vercel
     response.cookies.set('csrf_token', token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // Changed from 'strict' to 'lax' for better Vercel compatibility
       maxAge: 60 * 60, // 1 hour
       path: '/',
     });
