@@ -10,9 +10,9 @@ export async function POST(request: NextRequest) {
     // Extract CSRF token and request body
     const { token: csrfToken, body: requestBody } = await extractCsrfToken(request);
     
-    // Verify CSRF token (only in production or if explicitly enabled)
-    // Allow disabling CSRF for debugging by setting ENABLE_CSRF_PROTECTION to 'false'
-    if (process.env.ENABLE_CSRF_PROTECTION !== 'false' && (process.env.ENABLE_CSRF_PROTECTION === 'true' || process.env.NODE_ENV === 'production')) {
+    // Verify CSRF token (only if explicitly enabled)
+    // CSRF protection is now opt-in via ENABLE_CSRF_PROTECTION=true (disabled by default for better compatibility)
+    if (process.env.ENABLE_CSRF_PROTECTION === 'true') {
       if (!csrfToken) {
         console.error('[Login] CSRF token missing');
         return NextResponse.json(
@@ -31,7 +31,7 @@ export async function POST(request: NextRequest) {
       }
       console.log('[Login] CSRF token validated successfully');
     } else {
-      console.log('[Login] CSRF protection disabled');
+      console.log('[Login] CSRF protection disabled (set ENABLE_CSRF_PROTECTION=true to enable)');
     }
 
     // Check rate limit
