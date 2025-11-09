@@ -8,7 +8,7 @@
   "homepage": "https://paataai.com",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "rm -rf node_modules/.prisma node_modules/@prisma/client && prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
     "predeploy": "npm run build",
@@ -28,7 +28,7 @@
     "@google/generative-ai": "^0.24.1",
     "@heroicons/react": "2.0.18",
     "@material-tailwind/react": "^2.1.0",
-    "@prisma/client": "^6.16.3",
+    "@prisma/client": "^6.17.0",
     "@prisma/extension-accelerate": "^2.0.2",
     "@sendgrid/mail": "^8.1.6",
     "@types/dompurify": "^3.0.5",
