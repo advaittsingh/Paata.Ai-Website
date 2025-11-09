@@ -4,6 +4,10 @@ import { PrismaDatabase } from '@/lib/prisma-database';
 import { prisma } from '@/lib/prisma-database';
 import { checkAndAwardAchievements, initializeAchievementsAndBadges } from '@/lib/achievement-system';
 
+// Force dynamic rendering - don't execute during build
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
 /**
  * POST /api/achievements/check
  * Check and award achievements for the authenticated user
