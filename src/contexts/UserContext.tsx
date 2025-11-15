@@ -73,17 +73,30 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const verifyAuth = async () => {
       if (typeof window !== 'undefined') {
         try {
-          // First, try to load from localStorage for faster initial render
-          const savedUser = localStorage.getItem('paata_user');
-          if (savedUser) {
-            try {
-              const parsedUser = JSON.parse(savedUser);
-              if (parsedUser && typeof parsedUser === 'object' && parsedUser.id && parsedUser.email) {
-                setUser(parsedUser); // Set immediately for faster UI
+          // Check if we're coming from a logout - skip localStorage restoration
+          const urlParams = new URLSearchParams(window.location.search);
+          const isLogout = urlParams.get('logout') === 'true';
+          
+          if (isLogout) {
+            // Clear any remaining state
+            setUser(null);
+            clearUserContext();
+            localStorage.removeItem('paata_user');
+            // Clean up URL
+            window.history.replaceState({}, '', '/');
+          } else {
+            // First, try to load from localStorage for faster initial render
+            const savedUser = localStorage.getItem('paata_user');
+            if (savedUser) {
+              try {
+                const parsedUser = JSON.parse(savedUser);
+                if (parsedUser && typeof parsedUser === 'object' && parsedUser.id && parsedUser.email) {
+                  setUser(parsedUser); // Set immediately for faster UI
+                }
+              } catch (e) {
+                // Invalid localStorage data, clear it
+                localStorage.removeItem('paata_user');
               }
-            } catch (e) {
-              // Invalid localStorage data, clear it
-              localStorage.removeItem('paata_user');
             }
           }
 
@@ -93,8 +106,8 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
             credentials: 'include', // Include cookies
           });
 
-          // If 401, try to refresh token
-          if (response.status === 401) {
+          // If 401, try to refresh token (but not if we're coming from logout)
+          if (response.status === 401 && !isLogout) {
             const { refreshToken } = await import('@/utils/tokenRefresh');
             const refreshResult = await refreshToken();
             
@@ -290,28 +303,45 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = async () => {
     try {
-      // Call logout API to clear server-side session
-      const response = await fetch('/api/auth/logout', {
-        method: 'POST',
-        credentials: 'include', // Include cookies
-      });
-      
-      if (!response.ok) {
-        console.error('Logout API error:', response.status, response.statusText);
-      }
-    } catch (error) {
-      console.error('Logout API error:', error);
-      // Continue with client-side cleanup even if API fails
-    } finally {
-      // Clear client-side state
+      // Clear client-side state FIRST to prevent any UI updates
       setUser(null);
       clearUserContext();
       localStorage.removeItem('paata_user');
       
-      // Force a page reload to ensure all state is cleared
-      // This ensures cookies are properly cleared and user is redirected
+      // Call logout API to clear server-side session
+      try {
+        const response = await fetch('/api/auth/logout', {
+          method: 'POST',
+          credentials: 'include', // Include cookies
+        });
+        
+        if (!response.ok) {
+          console.error('Logout API error:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('Logout API error:', error);
+        // Continue even if API fails - we've already cleared client state
+      }
+      
+      // Force a full page reload to ensure all state is cleared
+      // Use replace instead of href to prevent back button navigation
       if (typeof window !== 'undefined') {
-        window.location.href = '/';
+        // Clear any remaining state
+        localStorage.clear();
+        sessionStorage.clear();
+        
+        // Use replace to prevent back button, and add timestamp to prevent cache
+        window.location.replace('/?logout=true&t=' + Date.now());
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Even on error, clear everything and redirect
+      if (typeof window !== 'undefined') {
+        setUser(null);
+        clearUserContext();
+        localStorage.clear();
+        sessionStorage.clear();
+        window.location.replace('/');
       }
     }
   };

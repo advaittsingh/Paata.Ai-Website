@@ -4,25 +4,30 @@ export async function POST(request: NextRequest) {
   try {
     // Create response
     const response = NextResponse.json({ 
-      message: 'Logged out successfully' 
+      message: 'Logged out successfully',
+      success: true
     });
 
-    // Clear auth token cookie
+    // Delete auth token cookie - use both methods to ensure it's cleared
+    response.cookies.delete('auth_token');
     response.cookies.set('auth_token', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', // Changed from 'strict' to 'lax' for better compatibility
-      maxAge: 0, // Expire immediately
+      sameSite: 'lax',
+      maxAge: 0,
       path: '/',
+      expires: new Date(0), // Set to epoch time
     });
 
-    // Clear refresh token cookie
+    // Delete refresh token cookie - use both methods to ensure it's cleared
+    response.cookies.delete('refresh_token');
     response.cookies.set('refresh_token', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax', // Changed from 'strict' to 'lax' for better compatibility
-      maxAge: 0, // Expire immediately
+      sameSite: 'lax',
+      maxAge: 0,
       path: '/',
+      expires: new Date(0), // Set to epoch time
     });
 
     return response;
