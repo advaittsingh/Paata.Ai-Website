@@ -38,9 +38,15 @@ export default function ProfileDropdown({ user }: ProfileDropdownProps) {
     };
   }, []);
 
-  const handleLogout = () => {
-    logout();
-    window.location.href = '/';
+  const handleLogout = async () => {
+    try {
+      await logout();
+      // Navigation handled in logout function
+    } catch (error) {
+      console.error('Logout error:', error);
+      // Force redirect even if logout fails
+      window.location.href = '/';
+    }
   };
 
   return (

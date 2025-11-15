@@ -51,7 +51,7 @@ interface UserContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; user?: User; error?: string }>;
   signup: (userData: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) => Promise<{ success: boolean; user?: User; error?: string }>;
-  logout: () => void;
+  logout: () => Promise<void>;
 }
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -291,10 +291,14 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = async () => {
     try {
       // Call logout API to clear server-side session
-      await fetch('/api/auth/logout', {
+      const response = await fetch('/api/auth/logout', {
         method: 'POST',
         credentials: 'include', // Include cookies
       });
+      
+      if (!response.ok) {
+        console.error('Logout API error:', response.status, response.statusText);
+      }
     } catch (error) {
       console.error('Logout API error:', error);
       // Continue with client-side cleanup even if API fails
@@ -303,6 +307,12 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       clearUserContext();
       localStorage.removeItem('paata_user');
+      
+      // Force a page reload to ensure all state is cleared
+      // This ensures cookies are properly cleared and user is redirected
+      if (typeof window !== 'undefined') {
+        window.location.href = '/';
+      }
     }
   };
 

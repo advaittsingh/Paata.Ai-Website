@@ -11,7 +11,16 @@ export async function POST(request: NextRequest) {
     response.cookies.set('auth_token', '', {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
+      sameSite: 'lax', // Changed from 'strict' to 'lax' for better compatibility
+      maxAge: 0, // Expire immediately
+      path: '/',
+    });
+
+    // Clear refresh token cookie
+    response.cookies.set('refresh_token', '', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'lax', // Changed from 'strict' to 'lax' for better compatibility
       maxAge: 0, // Expire immediately
       path: '/',
     });
