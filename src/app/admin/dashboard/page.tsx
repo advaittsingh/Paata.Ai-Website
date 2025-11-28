@@ -106,9 +106,21 @@ interface User {
   plan: string;
   subscriptionStatus: string;
   emailVerified: boolean;
-  totalInteractions: number;
-  streakDays: number;
+  totalInteractions?: number;
+  streakDays?: number;
   createdAt: string;
+  stats?: {
+    totalInteractions?: number;
+    streakDays?: number;
+    [key: string]: any;
+  };
+  counts?: {
+    notes?: number;
+    flashcards?: number;
+    examSessions?: number;
+    chatSessions?: number;
+    [key: string]: any;
+  };
 }
 
 export default function AdminDashboard() {
@@ -213,10 +225,27 @@ export default function AdminDashboard() {
       });
       if (response.ok) {
         const data = await response.json();
-        setSelectedUser(data.user);
+        if (data.success && data.user) {
+          // Merge the fetched user data with the existing user object
+          // to ensure all properties are available
+          const fullUserData = {
+            ...data.user,
+            totalInteractions: data.user.stats?.totalInteractions || data.user.totalInteractions || 0,
+            streakDays: data.user.stats?.streakDays || data.user.streakDays || 0,
+          };
+          setSelectedUser(fullUserData);
+        } else {
+          console.error('Invalid user data format:', data);
+          setError('Failed to load user details');
+        }
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        console.error('Fetch user details error:', errorData);
+        setError(errorData.error || 'Failed to load user details');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Fetch user details error:', err);
+      setError(err.message || 'Failed to load user details');
     }
   };
 
@@ -682,7 +711,7 @@ export default function AdminDashboard() {
                   >
                     <Card 
                       className="max-w-2xl w-full max-h-[90vh] overflow-y-auto"
-                      onClick={(e) => e.stopPropagation()}
+                      onClick={(e: React.MouseEvent) => e.stopPropagation()}
                     >
                       <CardBody className="p-6">
                         <div className="flex items-center justify-between mb-6">
@@ -714,12 +743,36 @@ export default function AdminDashboard() {
                           </div>
                           <div>
                             <Typography variant="small" color="gray" className="mb-1">Interactions</Typography>
-                            <Typography color="blue-gray">{selectedUser.totalInteractions.toLocaleString()}</Typography>
+                            <Typography color="blue-gray">
+                              {(selectedUser.totalInteractions || selectedUser.stats?.totalInteractions || 0).toLocaleString()}
+                            </Typography>
                           </div>
                           <div>
                             <Typography variant="small" color="gray" className="mb-1">Streak</Typography>
-                            <Typography color="blue-gray">{selectedUser.streakDays} days</Typography>
+                            <Typography color="blue-gray">
+                              {(selectedUser.streakDays || selectedUser.stats?.streakDays || 0)} days
+                            </Typography>
                           </div>
+                          {selectedUser.counts && (
+                            <>
+                              <div>
+                                <Typography variant="small" color="gray" className="mb-1">Notes</Typography>
+                                <Typography color="blue-gray">{selectedUser.counts.notes || 0}</Typography>
+                              </div>
+                              <div>
+                                <Typography variant="small" color="gray" className="mb-1">Flashcards</Typography>
+                                <Typography color="blue-gray">{selectedUser.counts.flashcards || 0}</Typography>
+                              </div>
+                              <div>
+                                <Typography variant="small" color="gray" className="mb-1">Exam Sessions</Typography>
+                                <Typography color="blue-gray">{selectedUser.counts.examSessions || 0}</Typography>
+                              </div>
+                              <div>
+                                <Typography variant="small" color="gray" className="mb-1">Chat Sessions</Typography>
+                                <Typography color="blue-gray">{selectedUser.counts.chatSessions || 0}</Typography>
+                              </div>
+                            </>
+                          )}
                           <div>
                             <Typography variant="small" color="gray" className="mb-1">Joined</Typography>
                             <Typography color="blue-gray">

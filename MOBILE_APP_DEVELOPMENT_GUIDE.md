@@ -15,6 +15,14 @@ This document provides comprehensive instructions for developing a native mobile
 5. [Project Structure](#5-project-structure)
 6. [Authentication Implementation](#6-authentication-implementation)
 7. [Core Features Implementation](#7-core-features-implementation)
+   - 7.1 [Chat Feature](#71-chat-feature)
+   - 7.2 [AI-Powered Notes Feature](#72-ai-powered-notes-feature)
+   - 7.3 [Flashcards Feature](#73-flashcards-feature-with-mastery-tracking)
+   - 7.4 [AI-Powered Exam Mode Feature](#74-ai-powered-exam-mode-feature)
+   - 7.5 [AI-Powered Mind Maps Feature](#75-ai-powered-mind-maps-feature)
+   - 7.6 [Focus Mode (Pomodoro Timer)](#76-focus-mode-pomodoro-timer)
+   - 7.7 [Progress Tracking & Achievements](#77-progress-tracking--achievements)
+   - 7.8 [Learning Materials Feature](#78-learning-materials-feature)
 8. [API Integration](#8-api-integration)
 9. [State Management](#9-state-management)
 10. [Offline Support & Data Sync](#10-offline-support--data-sync)
@@ -24,6 +32,20 @@ This document provides comprehensive instructions for developing a native mobile
 14. [Deployment](#14-deployment)
 15. [Troubleshooting](#15-troubleshooting)
 16. [Best Practices](#16-best-practices)
+17. [Navigation Implementation](#17-navigation-implementation)
+18. [Push Notifications](#18-push-notifications)
+19. [Biometric Authentication](#19-biometric-authentication)
+20. [File Upload Implementation](#20-file-upload-implementation)
+21. [Progress Tracking Implementation](#21-progress-tracking-implementation)
+22. [Achievements Implementation](#22-achievements-implementation)
+23. [Settings Implementation](#23-settings-implementation)
+24. [Learning Materials Implementation](#24-learning-materials-implementation)
+25. [Error Boundaries & Crash Handling](#25-error-boundaries--crash-handling)
+26. [Analytics Implementation](#26-analytics-implementation)
+27. [Performance Monitoring](#27-performance-monitoring)
+28. [Security Best Practices](#28-security-best-practices)
+29. [Accessibility](#29-accessibility)
+30. [Internationalization (i18n)](#30-internationalization-i18n)
 
 ---
 
@@ -31,14 +53,40 @@ This document provides comprehensive instructions for developing a native mobile
 
 ### 1.1 Application Purpose
 
-PAATA.AI Mobile App is a native mobile application that provides:
+PAATA.AI Mobile App is a native mobile application that provides complete feature parity with the website:
 
-- **AI-Powered Homework Assistance** - Interactive chat with AI for instant help
-- **Smart Learning Tools** - Notes, flashcards, mind maps, exam preparation
-- **Progress Tracking** - Analytics and insights into learning habits
-- **Gamification** - Achievements, badges, and streaks
+#### Core AI Features
+- **AI-Powered Chat** - Interactive chat with AI for instant homework help
+- **Multi-Modal Input** - Text, voice, and image support with OCR
+- **PDF Processing** - Upload and extract content from PDF documents
+- **Voice Input** - Speech-to-text with AI-powered responses
+
+#### Smart Learning Tools
+- **AI-Generated Notes** - Generate comprehensive notes from topics or conversation history (structured, outline, summary formats)
+- **AI-Generated Mind Maps** - Create hierarchical mind maps from topics with branches and sub-branches
+- **AI-Generated Exams** - Generate custom exams with multiple question types (MCQ, 2-marker, 5-marker, 10-marker)
+- **Exam Paper Solver** - Upload exam papers (PDF/image) and get AI-powered solutions
+- **Flashcards** - Create, review, and track mastery with spaced repetition
+- **Focus Mode** - Pomodoro timer for focused study sessions
+
+#### Learning Materials
+- **Structured Content** - Access organized content by board, class, subject, and chapter
+- **PDFs & Videos** - View educational PDFs and watch video lessons
+- **Chapter-Based Learning** - Integrated AI chat for each chapter
+
+#### Progress & Analytics
+- **Progress Dashboard** - Track learning activity, time spent, streaks
+- **Usage Analytics** - Weekly activity charts, subject breakdown, smart learning stats
+- **Achievements System** - Unlock achievements and earn badges
+- **Performance Insights** - AI-powered insights into learning patterns
+
+#### Additional Features
 - **Offline Support** - Work offline and sync when online
-- **Multi-Modal Input** - Text, voice, and image support
+- **Data Sync** - Seamless sync between mobile and web
+- **Profile Management** - Update profile, preferences, class/board selection
+- **Subscriptions** - Manage plans, billing, and invoices
+- **Push Notifications** - Get notified about achievements, streaks, and updates
+- **Biometric Authentication** - Secure login with fingerprint/face ID
 
 ### 1.2 Target Platforms
 
@@ -1045,45 +1093,134 @@ export const { addMessage, clearMessages } = chatSlice.actions;
 export default chatSlice.reducer;
 ```
 
-### 7.2 Notes Feature
+### 7.2 AI-Powered Notes Feature
 
-#### 7.2.1 Notes List Screen
+#### 7.2.1 Notes List Screen with AI Generation
 
 ```typescript
 // src/screens/notes/NotesListScreen.tsx
 import React, { useEffect, useState } from 'react';
-import { View, FlatList, TouchableOpacity, Text } from 'react-native';
+import { View, FlatList, TouchableOpacity, Text, Modal, TextInput, Alert } from 'react-native';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchNotes, createNote } from '../../store/slices/notesSlice';
+import { fetchNotes, createNote, generateNotes } from '../../store/slices/notesSlice';
 import NoteCard from '../../components/notes/NoteCard';
 
 export default function NotesListScreen({ navigation }: any) {
   const dispatch = useDispatch();
-  const { notes, isLoading } = useSelector((state: RootState) => state.notes);
+  const { notes, isLoading, isGenerating } = useSelector((state: RootState) => state.notes);
   const { user } = useSelector((state: RootState) => state.auth);
-  const [category, setCategory] = useState<string | undefined>();
+  const [category, setCategory] = useState<string>('all');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [generateTopic, setGenerateTopic] = useState('');
+  const [generateFormat, setGenerateFormat] = useState<'structured' | 'outline' | 'summary'>('structured');
 
   useEffect(() => {
     if (user) {
-      dispatch(fetchNotes({ userId: user.id, category }));
+      dispatch(fetchNotes({ userId: user.id, category: category !== 'all' ? category : undefined }));
     }
   }, [user, category]);
 
-  const handleCreateNote = () => {
-    navigation.navigate('NoteEditor', { mode: 'create' });
+  const handleGenerateNotes = async () => {
+    if (!generateTopic.trim()) {
+      Alert.alert('Error', 'Please enter a topic');
+      return;
+    }
+
+    try {
+      const result = await dispatch(generateNotes({
+        topic: generateTopic.trim(),
+        format: generateFormat,
+        autoSave: true,
+        category: 'AI Generated',
+        tags: ['AI Generated']
+      })).unwrap();
+
+      if (result.autoSaved) {
+        Alert.alert('Success', 'Notes generated and saved!');
+        setShowGenerateModal(false);
+        setGenerateTopic('');
+        dispatch(fetchNotes({ userId: user!.id }));
+      } else {
+        // Navigate to editor with generated content
+        navigation.navigate('NoteEditor', {
+          mode: 'create',
+          initialContent: result.note
+        });
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate notes');
+    }
   };
+
+  const handleGenerateFromChat = async (conversationHistory: any[]) => {
+    try {
+      const result = await dispatch(generateNotes({
+        conversationHistory,
+        format: generateFormat,
+        autoSave: true,
+        category: 'AI Generated',
+        tags: ['AI Generated', 'From Chat']
+      })).unwrap();
+
+      Alert.alert('Success', 'Notes generated from conversation!');
+      dispatch(fetchNotes({ userId: user!.id }));
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate notes');
+    }
+  };
+
+  const filteredNotes = notes.filter(note => {
+    if (searchQuery) {
+      const query = searchQuery.toLowerCase();
+      return note.title.toLowerCase().includes(query) ||
+             note.content.toLowerCase().includes(query) ||
+             note.category?.toLowerCase().includes(query);
+    }
+    return true;
+  });
 
   return (
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>My Notes</Text>
-        <TouchableOpacity onPress={handleCreateNote}>
-          <Text>+ New Note</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.generateButton}
+            onPress={() => setShowGenerateModal(true)}
+          >
+            <Text style={styles.generateButtonText}>✨ Generate with AI</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => navigation.navigate('NoteEditor', { mode: 'create' })}
+          >
+            <Text style={styles.createButtonText}>+ New Note</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Search Bar */}
+      <TextInput
+        style={styles.searchInput}
+        placeholder="Search notes..."
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+      />
+
+      {/* Category Filter */}
+      <View style={styles.categoryFilter}>
+        <TouchableOpacity
+          style={[styles.categoryButton, category === 'all' && styles.categoryButtonActive]}
+          onPress={() => setCategory('all')}
+        >
+          <Text>All</Text>
         </TouchableOpacity>
+        {/* Add category buttons dynamically */}
       </View>
 
       <FlatList
-        data={notes}
+        data={filteredNotes}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
           <NoteCard
@@ -1092,14 +1229,84 @@ export default function NotesListScreen({ navigation }: any) {
           />
         )}
         refreshing={isLoading}
-        onRefresh={() => dispatch(fetchNotes({ userId: user!.id, category }))}
+        onRefresh={() => dispatch(fetchNotes({ userId: user!.id, category: category !== 'all' ? category : undefined }))}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No notes yet</Text>
+            <TouchableOpacity onPress={() => setShowGenerateModal(true)}>
+              <Text style={styles.emptyActionText}>Generate with AI</Text>
+            </TouchableOpacity>
+          </View>
+        }
       />
+
+      {/* Generate Notes Modal */}
+      <Modal
+        visible={showGenerateModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowGenerateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Generate Notes with AI</Text>
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Enter topic (e.g., Laws of Motion)"
+              value={generateTopic}
+              onChangeText={setGenerateTopic}
+              multiline
+            />
+
+            <Text style={styles.formatLabel}>Format:</Text>
+            <View style={styles.formatButtons}>
+              <TouchableOpacity
+                style={[styles.formatButton, generateFormat === 'structured' && styles.formatButtonActive]}
+                onPress={() => setGenerateFormat('structured')}
+              >
+                <Text>Structured</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.formatButton, generateFormat === 'outline' && styles.formatButtonActive]}
+                onPress={() => setGenerateFormat('outline')}
+              >
+                <Text>Outline</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.formatButton, generateFormat === 'summary' && styles.formatButtonActive]}
+                onPress={() => setGenerateFormat('summary')}
+              >
+                <Text>Summary</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowGenerateModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalGenerateButton, isGenerating && styles.modalGenerateButtonDisabled]}
+                onPress={handleGenerateNotes}
+                disabled={isGenerating || !generateTopic.trim()}
+              >
+                <Text style={styles.modalGenerateButtonText}>
+                  {isGenerating ? 'Generating...' : 'Generate'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 ```
 
-#### 7.2.2 Notes Redux Slice
+#### 7.2.2 Notes Redux Slice with AI Generation
 
 ```typescript
 // src/store/slices/notesSlice.ts
@@ -1118,18 +1325,46 @@ export const fetchNotes = createAsyncThunk(
 export const createNote = createAsyncThunk(
   'notes/createNote',
   async (data: CreateNoteData, { dispatch }) => {
-    // Create locally first
     const localNote = { ...data, id: `local_${Date.now()}`, syncStatus: 'pending' };
     
-    // Try to sync immediately if online
     try {
       const response = await notesApi.create(data);
       return { ...response.data.note, syncStatus: 'synced' };
     } catch (error) {
-      // If offline, queue for sync
       await syncService.queueForSync('notes', localNote);
       return localNote;
     }
+  }
+);
+
+export const generateNotes = createAsyncThunk(
+  'notes/generateNotes',
+  async (params: {
+    topic?: string;
+    conversationHistory?: any[];
+    format?: 'structured' | 'outline' | 'summary';
+    autoSave?: boolean;
+    category?: string;
+    tags?: string[];
+  }) => {
+    const response = await notesApi.generate(params);
+    return response.data;
+  }
+);
+
+export const updateNote = createAsyncThunk(
+  'notes/updateNote',
+  async ({ id, ...data }: UpdateNoteData) => {
+    const response = await notesApi.update(id, data);
+    return response.data.note;
+  }
+);
+
+export const deleteNote = createAsyncThunk(
+  'notes/deleteNote',
+  async (id: string) => {
+    await notesApi.delete(id);
+    return id;
   }
 );
 
@@ -1138,6 +1373,7 @@ const notesSlice = createSlice({
   initialState: {
     notes: [],
     isLoading: false,
+    isGenerating: false,
     error: null,
   },
   reducers: {
@@ -1150,11 +1386,36 @@ const notesSlice = createSlice({
   },
   extraReducers: (builder) => {
     builder
+      .addCase(fetchNotes.pending, (state) => {
+        state.isLoading = true;
+      })
       .addCase(fetchNotes.fulfilled, (state, action) => {
+        state.isLoading = false;
         state.notes = action.payload;
       })
       .addCase(createNote.fulfilled, (state, action) => {
         state.notes.push(action.payload);
+      })
+      .addCase(generateNotes.pending, (state) => {
+        state.isGenerating = true;
+      })
+      .addCase(generateNotes.fulfilled, (state, action) => {
+        state.isGenerating = false;
+        if (action.payload.autoSaved && action.payload.savedNote) {
+          state.notes.push(action.payload.savedNote);
+        }
+      })
+      .addCase(generateNotes.rejected, (state) => {
+        state.isGenerating = false;
+      })
+      .addCase(updateNote.fulfilled, (state, action) => {
+        const index = state.notes.findIndex(n => n.id === action.payload.id);
+        if (index !== -1) {
+          state.notes[index] = action.payload;
+        }
+      })
+      .addCase(deleteNote.fulfilled, (state, action) => {
+        state.notes = state.notes.filter(n => n.id !== action.payload);
       });
   },
 });
@@ -1163,75 +1424,1146 @@ export const { updateLocalNote } = notesSlice.actions;
 export default notesSlice.reducer;
 ```
 
-### 7.3 Flashcards Feature
-
-Similar pattern to Notes - implement CRUD operations with offline support.
-
-### 7.4 Exam Mode Feature
+#### 7.2.3 Notes API Endpoints
 
 ```typescript
-// src/screens/exam/ExamScreen.tsx
-import React, { useState, useEffect } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { useDispatch } from 'react-redux';
-import { generateExam, submitExam } from '../../store/slices/examSlice';
+// src/services/api/endpoints.ts
+export const notesApi = {
+  getAll: (userId: string, category?: string, lastSync?: string) =>
+    apiClient.get('/notes', { params: { userId, category, lastSync } }),
+  
+  create: (data: CreateNoteData) =>
+    apiClient.post('/notes', data),
+  
+  update: (id: string, data: UpdateNoteData) =>
+    apiClient.put('/notes', { id, ...data }),
+  
+  delete: (id: string) =>
+    apiClient.delete('/notes', { params: { id } }),
+  
+  generate: (params: {
+    topic?: string;
+    conversationHistory?: any[];
+    format?: string;
+    autoSave?: boolean;
+    category?: string;
+    tags?: string[];
+  }) =>
+    apiClient.post('/notes/generate', params),
+};
+```
 
-export default function ExamScreen({ route }: any) {
-  const { subject, topic, difficulty } = route.params;
-  const [questions, setQuestions] = useState<Question[]>([]);
-  const [currentQuestion, setCurrentQuestion] = useState(0);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [timeSpent, setTimeSpent] = useState(0);
+### 7.3 Flashcards Feature with Mastery Tracking
+
+```typescript
+// src/screens/flashcards/FlashcardsScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, Modal, TextInput, Alert } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchFlashcards, createFlashcard, updateFlashcardMastery } from '../../store/slices/flashcardsSlice';
+
+export default function FlashcardsScreen() {
   const dispatch = useDispatch();
+  const { flashcards, isLoading } = useSelector((state: RootState) => state.flashcards);
+  const { user } = useSelector((state: RootState) => state.auth);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [showAnswer, setShowAnswer] = useState(false);
+  const [reviewMode, setReviewMode] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newFlashcard, setNewFlashcard] = useState({
+    question: '',
+    answer: '',
+    category: '',
+    difficulty: 'medium' as 'easy' | 'medium' | 'hard'
+  });
 
   useEffect(() => {
-    loadExam();
-    startTimer();
+    if (user) {
+      dispatch(fetchFlashcards({ userId: user.id, reviewOnly: reviewMode }));
+    }
+  }, [user, reviewMode]);
+
+  const handleNext = async (masteryLevel: number) => {
+    const currentCard = flashcards[currentIndex];
+    if (!currentCard) return;
+
+    await dispatch(updateFlashcardMastery({
+      id: currentCard.id,
+      masteryLevel,
+      lastReviewed: new Date().toISOString()
+    }));
+
+    if (currentIndex < flashcards.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setShowAnswer(false);
+    } else {
+      setReviewMode(false);
+      setCurrentIndex(0);
+      setShowAnswer(false);
+      Alert.alert('Complete!', 'You\'ve finished reviewing all flashcards');
+    }
+  };
+
+  const handleCreateFlashcard = async () => {
+    if (!newFlashcard.question || !newFlashcard.answer) {
+      Alert.alert('Error', 'Please fill in both question and answer');
+      return;
+    }
+
+    try {
+      await dispatch(createFlashcard({
+        ...newFlashcard,
+        userId: user!.id
+      })).unwrap();
+      
+      setShowCreate(false);
+      setNewFlashcard({ question: '', answer: '', category: '', difficulty: 'medium' });
+      Alert.alert('Success', 'Flashcard created!');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to create flashcard');
+    }
+  };
+
+  const currentCard = flashcards[currentIndex];
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Flashcards</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={[styles.reviewButton, reviewMode && styles.reviewButtonActive]}
+            onPress={() => setReviewMode(!reviewMode)}
+          >
+            <Text>{reviewMode ? 'Exit Review' : 'Start Review'}</Text>
+          </TouchableOpacity>
+          {!reviewMode && (
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={() => setShowCreate(true)}
+            >
+              <Text>+ Create</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {currentCard ? (
+        <View style={styles.cardContainer}>
+          <Text style={styles.cardCounter}>
+            Card {currentIndex + 1} of {flashcards.length}
+          </Text>
+
+          {!showAnswer ? (
+            <View style={styles.questionContainer}>
+              <Text style={styles.cardLabel}>Question</Text>
+              <Text style={styles.cardContent}>{currentCard.question}</Text>
+              {currentCard.category && (
+                <Text style={styles.categoryTag}>{currentCard.category}</Text>
+              )}
+              <TouchableOpacity
+                style={styles.showAnswerButton}
+                onPress={() => setShowAnswer(true)}
+              >
+                <Text style={styles.showAnswerButtonText}>Show Answer</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.answerContainer}>
+              <Text style={styles.cardLabel}>Answer</Text>
+              <Text style={styles.cardContent}>{currentCard.answer}</Text>
+              
+              <Text style={styles.masteryLabel}>How well did you know this?</Text>
+              <View style={styles.masteryButtons}>
+                <TouchableOpacity
+                  style={[styles.masteryButton, styles.masteryButtonRed]}
+                  onPress={() => handleNext(25)}
+                >
+                  <Text>Need Review</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.masteryButton, styles.masteryButtonYellow]}
+                  onPress={() => handleNext(50)}
+                >
+                  <Text>Getting There</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.masteryButton, styles.masteryButtonBlue]}
+                  onPress={() => handleNext(75)}
+                >
+                  <Text>Good</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.masteryButton, styles.masteryButtonGreen]}
+                  onPress={() => handleNext(100)}
+                >
+                  <Text>Mastered</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+        </View>
+      ) : (
+        <View style={styles.emptyContainer}>
+          <Text style={styles.emptyText}>No flashcards yet</Text>
+          <TouchableOpacity onPress={() => setShowCreate(true)}>
+            <Text style={styles.emptyActionText}>Create your first flashcard</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Create Flashcard Modal */}
+      <Modal
+        visible={showCreate}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowCreate(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Create Flashcard</Text>
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Question"
+              value={newFlashcard.question}
+              onChangeText={(text) => setNewFlashcard({ ...newFlashcard, question: text })}
+              multiline
+            />
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Answer"
+              value={newFlashcard.answer}
+              onChangeText={(text) => setNewFlashcard({ ...newFlashcard, answer: text })}
+              multiline
+            />
+            
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Category (optional)"
+              value={newFlashcard.category}
+              onChangeText={(text) => setNewFlashcard({ ...newFlashcard, category: text })}
+            />
+
+            <View style={styles.difficultyButtons}>
+              <TouchableOpacity
+                style={[styles.difficultyButton, newFlashcard.difficulty === 'easy' && styles.difficultyButtonActive]}
+                onPress={() => setNewFlashcard({ ...newFlashcard, difficulty: 'easy' })}
+              >
+                <Text>Easy</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.difficultyButton, newFlashcard.difficulty === 'medium' && styles.difficultyButtonActive]}
+                onPress={() => setNewFlashcard({ ...newFlashcard, difficulty: 'medium' })}
+              >
+                <Text>Medium</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.difficultyButton, newFlashcard.difficulty === 'hard' && styles.difficultyButtonActive]}
+                onPress={() => setNewFlashcard({ ...newFlashcard, difficulty: 'hard' })}
+              >
+                <Text>Hard</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowCreate(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalCreateButton}
+                onPress={handleCreateFlashcard}
+              >
+                <Text style={styles.modalCreateButtonText}>Create</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+```
+
+### 7.4 AI-Powered Exam Mode Feature
+
+#### 7.4.1 Exam Generation Screen
+
+```typescript
+// src/screens/exam/ExamGenerationScreen.tsx
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, TextInput, Modal, Alert, ScrollView } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { generateExam } from '../../store/slices/examSlice';
+
+export default function ExamGenerationScreen({ navigation }: any) {
+  const dispatch = useDispatch();
+  const { isGenerating } = useSelector((state: RootState) => state.exam);
+  const [examConfig, setExamConfig] = useState({
+    subject: '',
+    topic: '',
+    difficulty: 'medium' as 'easy' | 'medium' | 'hard',
+    questionTypes: {
+      mcq: { enabled: true, count: 5, marks: 1 },
+      twoMarker: { enabled: true, count: 3, marks: 2 },
+      fiveMarker: { enabled: false, count: 0, marks: 5 },
+      tenMarker: { enabled: false, count: 0, marks: 10 }
+    }
+  });
+
+  const handleGenerateExam = async () => {
+    if (!examConfig.subject.trim() || !examConfig.topic.trim()) {
+      Alert.alert('Error', 'Please fill in subject and topic');
+      return;
+    }
+
+    const totalQuestions = Object.values(examConfig.questionTypes)
+      .filter(qt => qt.enabled)
+      .reduce((sum, qt) => sum + qt.count, 0);
+
+    if (totalQuestions === 0) {
+      Alert.alert('Error', 'Please select at least one question type');
+      return;
+    }
+
+    try {
+      const questionTypesConfig: any = {};
+      if (examConfig.questionTypes.mcq.enabled && examConfig.questionTypes.mcq.count > 0) {
+        questionTypesConfig.mcq = {
+          count: examConfig.questionTypes.mcq.count,
+          marks: examConfig.questionTypes.mcq.marks
+        };
+      }
+      if (examConfig.questionTypes.twoMarker.enabled && examConfig.questionTypes.twoMarker.count > 0) {
+        questionTypesConfig.twoMarker = {
+          count: examConfig.questionTypes.twoMarker.count,
+          marks: examConfig.questionTypes.twoMarker.marks
+        };
+      }
+      if (examConfig.questionTypes.fiveMarker.enabled && examConfig.questionTypes.fiveMarker.count > 0) {
+        questionTypesConfig.fiveMarker = {
+          count: examConfig.questionTypes.fiveMarker.count,
+          marks: examConfig.questionTypes.fiveMarker.marks
+        };
+      }
+      if (examConfig.questionTypes.tenMarker.enabled && examConfig.questionTypes.tenMarker.count > 0) {
+        questionTypesConfig.tenMarker = {
+          count: examConfig.questionTypes.tenMarker.count,
+          marks: examConfig.questionTypes.tenMarker.marks
+        };
+      }
+
+      const result = await dispatch(generateExam({
+        subject: examConfig.subject.trim(),
+        topic: examConfig.topic.trim(),
+        difficulty: examConfig.difficulty,
+        questionTypes: questionTypesConfig
+      })).unwrap();
+
+      navigation.navigate('ExamTaking', {
+        examId: result.examId,
+        questions: result.questions
+      });
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate exam');
+    }
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.form}>
+        <Text style={styles.label}>Subject</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g., Mathematics, Physics"
+          value={examConfig.subject}
+          onChangeText={(text) => setExamConfig({ ...examConfig, subject: text })}
+        />
+
+        <Text style={styles.label}>Topic</Text>
+        <TextInput
+          style={styles.input}
+          placeholder="e.g., Laws of Motion, Quadratic Equations"
+          value={examConfig.topic}
+          onChangeText={(text) => setExamConfig({ ...examConfig, topic: text })}
+        />
+
+        <Text style={styles.label}>Difficulty</Text>
+        <View style={styles.difficultyButtons}>
+          <TouchableOpacity
+            style={[styles.difficultyButton, examConfig.difficulty === 'easy' && styles.difficultyButtonActive]}
+            onPress={() => setExamConfig({ ...examConfig, difficulty: 'easy' })}
+          >
+            <Text>Easy</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.difficultyButton, examConfig.difficulty === 'medium' && styles.difficultyButtonActive]}
+            onPress={() => setExamConfig({ ...examConfig, difficulty: 'medium' })}
+          >
+            <Text>Medium</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.difficultyButton, examConfig.difficulty === 'hard' && styles.difficultyButtonActive]}
+            onPress={() => setExamConfig({ ...examConfig, difficulty: 'hard' })}
+          >
+            <Text>Hard</Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={styles.sectionTitle}>Question Types</Text>
+
+        {/* MCQ */}
+        <View style={styles.questionTypeRow}>
+          <View style={styles.questionTypeHeader}>
+            <TouchableOpacity
+              style={styles.checkbox}
+              onPress={() => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  mcq: { ...examConfig.questionTypes.mcq, enabled: !examConfig.questionTypes.mcq.enabled }
+                }
+              })}
+            >
+              <Text>{examConfig.questionTypes.mcq.enabled ? '✓' : ''}</Text>
+            </TouchableOpacity>
+            <Text style={styles.questionTypeLabel}>Multiple Choice Questions (1 mark each)</Text>
+          </View>
+          {examConfig.questionTypes.mcq.enabled && (
+            <TextInput
+              style={styles.countInput}
+              placeholder="Count"
+              keyboardType="numeric"
+              value={examConfig.questionTypes.mcq.count.toString()}
+              onChangeText={(text) => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  mcq: { ...examConfig.questionTypes.mcq, count: parseInt(text) || 0 }
+                }
+              })}
+            />
+          )}
+        </View>
+
+        {/* 2-Marker */}
+        <View style={styles.questionTypeRow}>
+          <View style={styles.questionTypeHeader}>
+            <TouchableOpacity
+              style={styles.checkbox}
+              onPress={() => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  twoMarker: { ...examConfig.questionTypes.twoMarker, enabled: !examConfig.questionTypes.twoMarker.enabled }
+                }
+              })}
+            >
+              <Text>{examConfig.questionTypes.twoMarker.enabled ? '✓' : ''}</Text>
+            </TouchableOpacity>
+            <Text style={styles.questionTypeLabel}>Short Answer Questions (2 marks each)</Text>
+          </View>
+          {examConfig.questionTypes.twoMarker.enabled && (
+            <TextInput
+              style={styles.countInput}
+              placeholder="Count"
+              keyboardType="numeric"
+              value={examConfig.questionTypes.twoMarker.count.toString()}
+              onChangeText={(text) => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  twoMarker: { ...examConfig.questionTypes.twoMarker, count: parseInt(text) || 0 }
+                }
+              })}
+            />
+          )}
+        </View>
+
+        {/* 5-Marker */}
+        <View style={styles.questionTypeRow}>
+          <View style={styles.questionTypeHeader}>
+            <TouchableOpacity
+              style={styles.checkbox}
+              onPress={() => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  fiveMarker: { ...examConfig.questionTypes.fiveMarker, enabled: !examConfig.questionTypes.fiveMarker.enabled }
+                }
+              })}
+            >
+              <Text>{examConfig.questionTypes.fiveMarker.enabled ? '✓' : ''}</Text>
+            </TouchableOpacity>
+            <Text style={styles.questionTypeLabel}>Long Answer Questions (5 marks each)</Text>
+          </View>
+          {examConfig.questionTypes.fiveMarker.enabled && (
+            <TextInput
+              style={styles.countInput}
+              placeholder="Count"
+              keyboardType="numeric"
+              value={examConfig.questionTypes.fiveMarker.count.toString()}
+              onChangeText={(text) => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  fiveMarker: { ...examConfig.questionTypes.fiveMarker, count: parseInt(text) || 0 }
+                }
+              })}
+            />
+          )}
+        </View>
+
+        {/* 10-Marker */}
+        <View style={styles.questionTypeRow}>
+          <View style={styles.questionTypeHeader}>
+            <TouchableOpacity
+              style={styles.checkbox}
+              onPress={() => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  tenMarker: { ...examConfig.questionTypes.tenMarker, enabled: !examConfig.questionTypes.tenMarker.enabled }
+                }
+              })}
+            >
+              <Text>{examConfig.questionTypes.tenMarker.enabled ? '✓' : ''}</Text>
+            </TouchableOpacity>
+            <Text style={styles.questionTypeLabel}>Essay Questions (10 marks each)</Text>
+          </View>
+          {examConfig.questionTypes.tenMarker.enabled && (
+            <TextInput
+              style={styles.countInput}
+              placeholder="Count"
+              keyboardType="numeric"
+              value={examConfig.questionTypes.tenMarker.count.toString()}
+              onChangeText={(text) => setExamConfig({
+                ...examConfig,
+                questionTypes: {
+                  ...examConfig.questionTypes,
+                  tenMarker: { ...examConfig.questionTypes.tenMarker, count: parseInt(text) || 0 }
+                }
+              })}
+            />
+          )}
+        </View>
+
+        <TouchableOpacity
+          style={[styles.generateButton, isGenerating && styles.generateButtonDisabled]}
+          onPress={handleGenerateExam}
+          disabled={isGenerating}
+        >
+          <Text style={styles.generateButtonText}>
+            {isGenerating ? 'Generating Exam...' : 'Generate Exam'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </ScrollView>
+  );
+}
+```
+
+#### 7.4.2 Exam Taking Screen
+
+```typescript
+// src/screens/exam/ExamTakingScreen.tsx
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, TouchableOpacity, ScrollView, Alert, Modal } from 'react-native';
+import { useDispatch } from 'react-redux';
+import { submitExam } from '../../store/slices/examSlice';
+
+export default function ExamTakingScreen({ route, navigation }: any) {
+  const { examId, questions } = route.params;
+  const dispatch = useDispatch();
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [answers, setAnswers] = useState<Record<string, any>>({});
+  const [timeSpent, setTimeSpent] = useState(0);
+  const [showSubmitModal, setShowSubmitModal] = useState(false);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+
+  useEffect(() => {
+    // Start timer
+    timerRef.current = setInterval(() => {
+      setTimeSpent(prev => prev + 1);
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    };
   }, []);
 
-  const loadExam = async () => {
-    const result = await dispatch(generateExam({ subject, topic, difficulty })).unwrap();
-    setQuestions(result.questions);
+  const handleAnswerChange = (questionId: string, answer: any) => {
+    setAnswers(prev => ({
+      ...prev,
+      [questionId]: answer
+    }));
+  };
+
+  const handleNext = () => {
+    if (currentQuestionIndex < questions.length - 1) {
+      setCurrentQuestionIndex(currentQuestionIndex + 1);
+    }
+  };
+
+  const handlePrevious = () => {
+    if (currentQuestionIndex > 0) {
+      setCurrentQuestionIndex(currentQuestionIndex - 1);
+    }
   };
 
   const handleSubmit = async () => {
-    const result = await dispatch(submitExam({
-      examId: questions[0].examId,
-      answers,
-      timeSpent,
-    })).unwrap();
+    setShowSubmitModal(false);
     
-    // Navigate to results screen
+    try {
+      const result = await dispatch(submitExam({
+        examId,
+        answers,
+        timeSpent
+      })).unwrap();
+
+      navigation.replace('ExamResults', {
+        examId,
+        results: result
+      });
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to submit exam');
+    }
+  };
+
+  const currentQuestion = questions[currentQuestionIndex];
+  const answeredCount = Object.keys(answers).length;
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   return (
     <View style={styles.container}>
-      <Text>Question {currentQuestion + 1} of {questions.length}</Text>
-      <Text>{questions[currentQuestion]?.question}</Text>
-      {/* Render options */}
-      <TouchableOpacity onPress={handleSubmit}>
-        <Text>Submit</Text>
+      {/* Header */}
+      <View style={styles.header}>
+        <Text style={styles.headerText}>
+          Question {currentQuestionIndex + 1} of {questions.length}
+        </Text>
+        <Text style={styles.timerText}>{formatTime(timeSpent)}</Text>
+      </View>
+
+      {/* Progress Bar */}
+      <View style={styles.progressBar}>
+        <View
+          style={[styles.progressFill, { width: `${((currentQuestionIndex + 1) / questions.length) * 100}%` }]}
+        />
+      </View>
+
+      <ScrollView style={styles.content}>
+        <View style={styles.questionContainer}>
+          <Text style={styles.questionNumber}>
+            Question {currentQuestionIndex + 1} ({currentQuestion.marks} marks)
+          </Text>
+          <Text style={styles.questionText}>{currentQuestion.question}</Text>
+
+          {currentQuestion.type === 'mcq' && currentQuestion.options && (
+            <View style={styles.optionsContainer}>
+              {currentQuestion.options.map((option: string, index: number) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    styles.optionButton,
+                    answers[currentQuestion.id] === index && styles.optionButtonSelected
+                  ]}
+                  onPress={() => handleAnswerChange(currentQuestion.id, index)}
+                >
+                  <Text style={styles.optionLabel}>{String.fromCharCode(65 + index)}.</Text>
+                  <Text style={styles.optionText}>{option}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          )}
+
+          {(currentQuestion.type === 'twoMarker' || currentQuestion.type === 'fiveMarker' || currentQuestion.type === 'tenMarker') && (
+            <TextInput
+              style={styles.textAnswerInput}
+              placeholder="Type your answer here..."
+              multiline
+              value={answers[currentQuestion.id] || ''}
+              onChangeText={(text) => handleAnswerChange(currentQuestion.id, text)}
+            />
+          )}
+        </View>
+      </ScrollView>
+
+      {/* Navigation Buttons */}
+      <View style={styles.navigationButtons}>
+        <TouchableOpacity
+          style={[styles.navButton, currentQuestionIndex === 0 && styles.navButtonDisabled]}
+          onPress={handlePrevious}
+          disabled={currentQuestionIndex === 0}
+        >
+          <Text>Previous</Text>
+        </TouchableOpacity>
+
+        {currentQuestionIndex < questions.length - 1 ? (
+          <TouchableOpacity style={styles.navButton} onPress={handleNext}>
+            <Text>Next</Text>
+          </TouchableOpacity>
+        ) : (
+          <TouchableOpacity
+            style={styles.submitButton}
+            onPress={() => setShowSubmitModal(true)}
+          >
+            <Text style={styles.submitButtonText}>Submit Exam</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Submit Confirmation Modal */}
+      <Modal
+        visible={showSubmitModal}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setShowSubmitModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Submit Exam?</Text>
+            <Text style={styles.modalText}>
+              You have answered {answeredCount} out of {questions.length} questions.
+              Are you sure you want to submit?
+            </Text>
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowSubmitModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.modalSubmitButton}
+                onPress={handleSubmit}
+              >
+                <Text style={styles.modalSubmitButtonText}>Submit</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+```
+
+#### 7.4.3 Exam Results Screen
+
+```typescript
+// src/screens/exam/ExamResultsScreen.tsx
+import React from 'react';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+
+export default function ExamResultsScreen({ route, navigation }: any) {
+  const { results } = route.params;
+  const { score, totalMarks, percentage, questions, answers } = results;
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryTitle}>Exam Results</Text>
+        <Text style={styles.scoreText}>{score} / {totalMarks}</Text>
+        <Text style={styles.percentageText}>{percentage}%</Text>
+      </View>
+
+      <View style={styles.questionsContainer}>
+        {questions.map((question: any, index: number) => {
+          const userAnswer = answers[question.id];
+          const isCorrect = question.type === 'mcq'
+            ? userAnswer === question.correctAnswer
+            : question.isCorrect; // For text answers, backend determines correctness
+
+          return (
+            <View key={question.id} style={styles.questionResultCard}>
+              <View style={styles.questionHeader}>
+                <Text style={styles.questionNumber}>Question {index + 1}</Text>
+                {isCorrect ? (
+                  <Text style={styles.correctBadge}>✓ Correct</Text>
+                ) : (
+                  <Text style={styles.incorrectBadge}>✗ Incorrect</Text>
+                )}
+              </View>
+              <Text style={styles.questionText}>{question.question}</Text>
+              {question.type === 'mcq' && (
+                <>
+                  <Text style={styles.answerLabel}>Your Answer:</Text>
+                  <Text style={styles.userAnswer}>
+                    {question.options[userAnswer]}
+                  </Text>
+                  <Text style={styles.answerLabel}>Correct Answer:</Text>
+                  <Text style={styles.correctAnswer}>
+                    {question.finalAnswer}
+                  </Text>
+                </>
+              )}
+              {question.explanation && (
+                <>
+                  <Text style={styles.explanationLabel}>Explanation:</Text>
+                  <Text style={styles.explanation}>{question.explanation}</Text>
+                </>
+              )}
+            </View>
+          );
+        })}
+      </View>
+
+      <TouchableOpacity
+        style={styles.backButton}
+        onPress={() => navigation.navigate('ExamGeneration')}
+      >
+        <Text style={styles.backButtonText}>Create New Exam</Text>
+      </TouchableOpacity>
+    </ScrollView>
+  );
+}
+```
+
+#### 7.4.4 Solve Exam Paper Feature
+
+```typescript
+// src/screens/exam/SolvePaperScreen.tsx
+import React, { useState } from 'react';
+import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import DocumentPicker from 'react-native-document-picker';
+import { solveExamPaper } from '../../store/slices/examSlice';
+
+export default function SolvePaperScreen({ navigation }: any) {
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const handlePickPaper = async () => {
+    try {
+      const result = await DocumentPicker.pick({
+        type: [DocumentPicker.types.pdf, DocumentPicker.types.images],
+      });
+
+      setIsProcessing(true);
+
+      const formData = new FormData();
+      formData.append('file', {
+        uri: result[0].uri,
+        type: result[0].type,
+        name: result[0].name,
+      } as any);
+
+      const solutions = await dispatch(solveExamPaper(formData)).unwrap();
+
+      navigation.navigate('PaperSolutions', {
+        solutions: solutions.questions,
+        paperInfo: solutions.paperInfo
+      });
+    } catch (error: any) {
+      if (DocumentPicker.isCancel(error)) {
+        return;
+      }
+      Alert.alert('Error', error.message || 'Failed to process paper');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.title}>Solve Exam Paper</Text>
+      <Text style={styles.description}>
+        Upload a PDF or image of an exam paper and get AI-powered solutions
+      </Text>
+
+      <TouchableOpacity
+        style={[styles.uploadButton, isProcessing && styles.uploadButtonDisabled]}
+        onPress={handlePickPaper}
+        disabled={isProcessing}
+      >
+        <Text style={styles.uploadButtonText}>
+          {isProcessing ? 'Processing...' : 'Upload Paper'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
 }
 ```
 
-### 7.5 Focus Mode (Pomodoro)
+### 7.5 AI-Powered Mind Maps Feature
+
+#### 7.5.1 Mind Maps List Screen
+
+```typescript
+// src/screens/mindmaps/MindMapsListScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, FlatList, TouchableOpacity, Text, Modal, TextInput, Alert } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchMindMaps, generateMindMap, createMindMap } from '../../store/slices/mindmapsSlice';
+
+export default function MindMapsListScreen({ navigation }: any) {
+  const dispatch = useDispatch();
+  const { mindMaps, isLoading, isGenerating } = useSelector((state: RootState) => state.mindmaps);
+  const { user } = useSelector((state: RootState) => state.auth);
+  const [showGenerateModal, setShowGenerateModal] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [generateTopic, setGenerateTopic] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('all');
+
+  useEffect(() => {
+    if (user) {
+      dispatch(fetchMindMaps({ userId: user.id, category: selectedCategory !== 'all' ? selectedCategory : undefined }));
+    }
+  }, [user, selectedCategory]);
+
+  const handleGenerateMindMap = async () => {
+    if (!generateTopic.trim()) {
+      Alert.alert('Error', 'Please enter a topic');
+      return;
+    }
+
+    try {
+      const result = await dispatch(generateMindMap({
+        topic: generateTopic.trim(),
+        title: `Mind Map: ${generateTopic.trim()}`,
+        category: 'AI Generated'
+      })).unwrap();
+
+      Alert.alert('Success', 'Mind map generated!');
+      setShowGenerateModal(false);
+      setGenerateTopic('');
+      dispatch(fetchMindMaps({ userId: user!.id }));
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to generate mind map');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>Mind Maps</Text>
+        <View style={styles.headerActions}>
+          <TouchableOpacity
+            style={styles.generateButton}
+            onPress={() => setShowGenerateModal(true)}
+          >
+            <Text style={styles.generateButtonText}>✨ Generate with AI</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.createButton}
+            onPress={() => setShowCreateModal(true)}
+          >
+            <Text style={styles.createButtonText}>+ Create New</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      <FlatList
+        data={mindMaps}
+        keyExtractor={(item) => item.id}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={styles.mindMapCard}
+            onPress={() => navigation.navigate('MindMapView', { mindMapId: item.id })}
+          >
+            <Text style={styles.mindMapTitle}>{item.title}</Text>
+            {item.category && (
+              <Text style={styles.mindMapCategory}>{item.category}</Text>
+            )}
+          </TouchableOpacity>
+        )}
+        refreshing={isLoading}
+        onRefresh={() => dispatch(fetchMindMaps({ userId: user!.id }))}
+        ListEmptyComponent={
+          <View style={styles.emptyContainer}>
+            <Text style={styles.emptyText}>No mind maps yet</Text>
+            <TouchableOpacity onPress={() => setShowGenerateModal(true)}>
+              <Text style={styles.emptyActionText}>Generate with AI</Text>
+            </TouchableOpacity>
+          </View>
+        }
+      />
+
+      {/* Generate Modal */}
+      <Modal
+        visible={showGenerateModal}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setShowGenerateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Generate Mind Map with AI</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="Enter topic (e.g., Laws of Motion)"
+              value={generateTopic}
+              onChangeText={setGenerateTopic}
+              multiline
+            />
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.modalCancelButton}
+                onPress={() => setShowGenerateModal(false)}
+              >
+                <Text>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalGenerateButton, isGenerating && styles.modalGenerateButtonDisabled]}
+                onPress={handleGenerateMindMap}
+                disabled={isGenerating || !generateTopic.trim()}
+              >
+                <Text style={styles.modalGenerateButtonText}>
+                  {isGenerating ? 'Generating...' : 'Generate'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+```
+
+#### 7.5.2 Mind Map View/Editor Screen
+
+```typescript
+// src/screens/mindmaps/MindMapViewScreen.tsx
+import React, { useState } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, Modal, TextInput } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { updateMindMap } from '../../store/slices/mindmapsSlice';
+
+interface MindMapNode {
+  id: string;
+  label: string;
+  description?: string;
+  color?: string;
+  children: MindMapNode[];
+}
+
+interface MindMapStructure {
+  centralTopic: string;
+  branches: MindMapNode[];
+}
+
+export default function MindMapViewScreen({ route, navigation }: any) {
+  const { mindMapId } = route.params;
+  const dispatch = useDispatch();
+  const { mindMaps } = useSelector((state: RootState) => state.mindmaps);
+  const mindMap = mindMaps.find(m => m.id === mindMapId);
+  const [isEditing, setIsEditing] = useState(false);
+  const [structure, setStructure] = useState<MindMapStructure>(
+    mindMap ? JSON.parse(mindMap.structure) : { centralTopic: '', branches: [] }
+  );
+
+  const renderMindMap = () => {
+    return (
+      <View style={styles.mindMapContainer}>
+        {/* Central Topic */}
+        <View style={styles.centralTopicContainer}>
+          <Text style={styles.centralTopic}>{structure.centralTopic}</Text>
+        </View>
+
+        {/* Branches */}
+        <View style={styles.branchesContainer}>
+          {structure.branches.map((branch, idx) => (
+            <View key={branch.id || idx} style={styles.branchCard}>
+              <View style={[styles.branchHeader, { backgroundColor: branch.color || '#3b82f6' }]}>
+                <Text style={styles.branchLabel}>{branch.label}</Text>
+                {branch.description && (
+                  <Text style={styles.branchDescription}>{branch.description}</Text>
+                )}
+              </View>
+              
+              {branch.children && branch.children.length > 0 && (
+                <View style={styles.subBranchesContainer}>
+                  {branch.children.map((child, childIdx) => (
+                    <View key={child.id || childIdx} style={styles.subBranchCard}>
+                      <Text style={styles.subBranchLabel}>{child.label}</Text>
+                      {child.description && (
+                        <Text style={styles.subBranchDescription}>{child.description}</Text>
+                      )}
+                    </View>
+                  ))}
+                </View>
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
+    );
+  };
+
+  const handleSave = async () => {
+    try {
+      await dispatch(updateMindMap({
+        id: mindMapId,
+        structure: JSON.stringify(structure)
+      })).unwrap();
+      
+      setIsEditing(false);
+      Alert.alert('Success', 'Mind map updated!');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to update mind map');
+    }
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.title}>{mindMap?.title}</Text>
+        <TouchableOpacity
+          style={styles.editButton}
+          onPress={() => setIsEditing(!isEditing)}
+        >
+          <Text>{isEditing ? 'View' : 'Edit'}</Text>
+        </TouchableOpacity>
+      </View>
+
+      {isEditing ? (
+        <View style={styles.editorContainer}>
+          {/* Editor UI for modifying structure */}
+          <TextInput
+            style={styles.centralTopicInput}
+            placeholder="Central Topic"
+            value={structure.centralTopic}
+            onChangeText={(text) => setStructure({ ...structure, centralTopic: text })}
+          />
+          {/* Add branch editing UI */}
+          <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+            <Text style={styles.saveButtonText}>Save Changes</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        renderMindMap()
+      )}
+    </ScrollView>
+  );
+}
+```
+
+### 7.6 Focus Mode (Pomodoro Timer)
 
 ```typescript
 // src/screens/focus/FocusScreen.tsx
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity } from 'react-native';
-import { useDispatch } from 'react-redux';
+import { View, Text, TouchableOpacity, Alert } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
 import { createFocusSession, updateFocusSession } from '../../store/slices/focusSlice';
 
 export default function FocusScreen() {
-  const [duration, setDuration] = useState(1500); // 25 minutes
+  const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
+  const [duration, setDuration] = useState(1500); // 25 minutes default
   const [isRunning, setIsRunning] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(duration);
+  const [sessionId, setSessionId] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const dispatch = useDispatch();
 
   useEffect(() => {
     if (isRunning && timeRemaining > 0) {
@@ -1258,22 +2590,52 @@ export default function FocusScreen() {
   }, [isRunning, timeRemaining]);
 
   const handleStart = async () => {
-    const session = await dispatch(createFocusSession({
-      duration,
-      mode: 'pomodoro',
-      status: 'active',
-    })).unwrap();
-    
+    try {
+      const result = await dispatch(createFocusSession({
+        duration,
+        mode: 'pomodoro',
+        status: 'active',
+        userId: user!.id
+      })).unwrap();
+      
+      setSessionId(result.id);
+      setIsRunning(true);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to start focus session');
+    }
+  };
+
+  const handlePause = () => {
+    setIsRunning(false);
+  };
+
+  const handleResume = () => {
     setIsRunning(true);
   };
 
   const handleComplete = async () => {
     setIsRunning(false);
-    await dispatch(updateFocusSession({
-      id: sessionId,
-      status: 'completed',
-      completedAt: new Date().toISOString(),
-    }));
+    if (sessionId) {
+      try {
+        await dispatch(updateFocusSession({
+          id: sessionId,
+          status: 'completed',
+          completedAt: new Date().toISOString()
+        })).unwrap();
+        
+        Alert.alert('Great Job!', 'Focus session completed!');
+        setTimeRemaining(duration);
+        setSessionId(null);
+      } catch (error: any) {
+        console.error('Error completing session:', error);
+      }
+    }
+  };
+
+  const handleReset = () => {
+    setIsRunning(false);
+    setTimeRemaining(duration);
+    setSessionId(null);
   };
 
   const formatTime = (seconds: number) => {
@@ -1282,13 +2644,644 @@ export default function FocusScreen() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  const presetDurations = [
+    { label: '15 min', value: 900 },
+    { label: '25 min', value: 1500 },
+    { label: '45 min', value: 2700 },
+    { label: '60 min', value: 3600 }
+  ];
+
   return (
     <View style={styles.container}>
-      <Text style={styles.timer}>{formatTime(timeRemaining)}</Text>
-      <TouchableOpacity onPress={isRunning ? handlePause : handleStart}>
-        <Text>{isRunning ? 'Pause' : 'Start'}</Text>
-      </TouchableOpacity>
+      <Text style={styles.title}>Focus Mode</Text>
+      
+      {!isRunning && !sessionId && (
+        <View style={styles.presetContainer}>
+          <Text style={styles.presetLabel}>Select Duration:</Text>
+          <View style={styles.presetButtons}>
+            {presetDurations.map((preset) => (
+              <TouchableOpacity
+                key={preset.value}
+                style={[styles.presetButton, duration === preset.value && styles.presetButtonActive]}
+                onPress={() => {
+                  setDuration(preset.value);
+                  setTimeRemaining(preset.value);
+                }}
+              >
+                <Text>{preset.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+
+      <View style={styles.timerContainer}>
+        <Text style={styles.timerText}>{formatTime(timeRemaining)}</Text>
+      </View>
+
+      <View style={styles.controlsContainer}>
+        {!isRunning && !sessionId && (
+          <TouchableOpacity style={styles.startButton} onPress={handleStart}>
+            <Text style={styles.startButtonText}>Start</Text>
+          </TouchableOpacity>
+        )}
+
+        {isRunning && (
+          <TouchableOpacity style={styles.pauseButton} onPress={handlePause}>
+            <Text style={styles.pauseButtonText}>Pause</Text>
+          </TouchableOpacity>
+        )}
+
+        {!isRunning && sessionId && (
+          <>
+            <TouchableOpacity style={styles.resumeButton} onPress={handleResume}>
+              <Text style={styles.resumeButtonText}>Resume</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.resetButton} onPress={handleReset}>
+              <Text style={styles.resetButtonText}>Reset</Text>
+            </TouchableOpacity>
+          </>
+        )}
+      </View>
+
+      {sessionId && (
+        <View style={styles.statsContainer}>
+          <Text style={styles.statsText}>
+            Session Active • {formatTime(duration - timeRemaining)} elapsed
+          </Text>
+        </View>
+      )}
     </View>
+  );
+}
+```
+
+### 7.7 Progress Tracking & Achievements
+
+#### 7.7.1 Progress Dashboard Screen
+
+```typescript
+// src/screens/progress/ProgressScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchProgress, fetchUsageData } from '../../store/slices/progressSlice';
+import { fetchAchievements } from '../../store/slices/achievementsSlice';
+
+export default function ProgressScreen() {
+  const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
+  const { progress, usageData, isLoading } = useSelector((state: RootState) => state.progress);
+  const { achievements, badges, isLoading: isLoadingAchievements } = useSelector((state: RootState) => state.achievements);
+  const [selectedPeriod, setSelectedPeriod] = useState<'7d' | '30d' | '90d' | '1y'>('30d');
+  const [selectedTab, setSelectedTab] = useState<'progress' | 'achievements'>('progress');
+
+  useEffect(() => {
+    if (user) {
+      dispatch(fetchProgress({ period: selectedPeriod }));
+      dispatch(fetchUsageData({ userId: user.id, period: selectedPeriod }));
+      dispatch(fetchAchievements({ userId: user.id }));
+    }
+  }, [user, selectedPeriod, selectedTab]);
+
+  return (
+    <ScrollView style={styles.container}>
+      {/* Tab Selector */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, selectedTab === 'progress' && styles.tabActive]}
+          onPress={() => setSelectedTab('progress')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'progress' && styles.tabTextActive]}>
+            Progress
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, selectedTab === 'achievements' && styles.tabActive]}
+          onPress={() => setSelectedTab('achievements')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'achievements' && styles.tabTextActive]}>
+            Achievements
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {selectedTab === 'progress' ? (
+        <>
+          {/* Period Selector */}
+          <View style={styles.periodSelector}>
+            {(['7d', '30d', '90d', '1y'] as const).map((period) => (
+              <TouchableOpacity
+                key={period}
+                style={[styles.periodButton, selectedPeriod === period && styles.periodButtonActive]}
+                onPress={() => setSelectedPeriod(period)}
+              >
+                <Text>{period.toUpperCase()}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          {/* Overview Cards */}
+          <View style={styles.statsGrid}>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{usageData?.totalInteractions || 0}</Text>
+              <Text style={styles.statLabel}>Questions Answered</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{usageData?.totalTimeSpent || '0h 0m'}</Text>
+              <Text style={styles.statLabel}>Study Time</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{usageData?.streakDays || 0}</Text>
+              <Text style={styles.statLabel}>Day Streak</Text>
+            </View>
+            <View style={styles.statCard}>
+              <Text style={styles.statValue}>{usageData?.averageSessionTime || '0m'}</Text>
+              <Text style={styles.statLabel}>Avg Session</Text>
+            </View>
+          </View>
+
+          {/* Weekly Activity Chart */}
+          <View style={styles.chartContainer}>
+            <Text style={styles.sectionTitle}>Weekly Activity</Text>
+            {usageData?.weeklyData?.map((day: any, index: number) => (
+              <View key={index} style={styles.chartBar}>
+                <Text style={styles.chartLabel}>{day.day}</Text>
+                <View style={styles.chartBarContainer}>
+                  <View
+                    style={[styles.chartBarFill, { width: `${(day.interactions / 70) * 100}%` }]}
+                  />
+                </View>
+                <Text style={styles.chartValue}>{day.interactions}</Text>
+              </View>
+            ))}
+          </View>
+
+          {/* Subject Breakdown */}
+          <View style={styles.subjectBreakdown}>
+            <Text style={styles.sectionTitle}>Topics Studied</Text>
+            {usageData?.subjectBreakdown?.map((subject: any, index: number) => (
+              <View key={index} style={styles.subjectRow}>
+                <View style={styles.subjectInfo}>
+                  <View style={[styles.subjectColor, { backgroundColor: subject.color }]} />
+                  <Text style={styles.subjectName}>{subject.subject}</Text>
+                </View>
+                <View style={styles.subjectStats}>
+                  <Text style={styles.subjectCount}>{subject.interactions} questions</Text>
+                  <Text style={styles.subjectPercentage}>{subject.percentage}%</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+
+          {/* Smart Learning Stats */}
+          <View style={styles.smartLearningStats}>
+            <Text style={styles.sectionTitle}>Smart Learning Activity</Text>
+            <View style={styles.smartLearningGrid}>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.chatSessions || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Chat Sessions</Text>
+              </View>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.notes || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Notes</Text>
+              </View>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.flashcards || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Flashcards</Text>
+              </View>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.mindMaps || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Mind Maps</Text>
+              </View>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.examSessions || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Exam Sessions</Text>
+              </View>
+              <View style={styles.smartLearningCard}>
+                <Text style={styles.smartLearningValue}>
+                  {usageData?.smartLearning?.focusSessions || 0}
+                </Text>
+                <Text style={styles.smartLearningLabel}>Focus Sessions</Text>
+              </View>
+            </View>
+          </View>
+        </>
+      ) : (
+        <>
+          {/* Achievements Section */}
+          <View style={styles.achievementsStats}>
+            <View style={styles.achievementStatCard}>
+              <Text style={styles.achievementStatValue}>
+                {achievements?.filter(a => a.isUnlocked).length || 0} / {achievements?.length || 0}
+              </Text>
+              <Text style={styles.achievementStatLabel}>Achievements Unlocked</Text>
+            </View>
+            <View style={styles.achievementStatCard}>
+              <Text style={styles.achievementStatValue}>
+                {badges?.filter(b => b.earned).length || 0} / {badges?.length || 0}
+              </Text>
+              <Text style={styles.achievementStatLabel}>Badges Earned</Text>
+            </View>
+          </View>
+
+          {/* Achievements List */}
+          <View style={styles.achievementsList}>
+            <Text style={styles.sectionTitle}>Achievements</Text>
+            {achievements?.map((achievement: any) => (
+              <View
+                key={achievement.id}
+                style={[
+                  styles.achievementCard,
+                  achievement.isUnlocked && styles.achievementCardUnlocked
+                ]}
+              >
+                <View style={styles.achievementIcon}>
+                  <Text style={styles.achievementIconText}>{achievement.icon}</Text>
+                </View>
+                <View style={styles.achievementInfo}>
+                  <Text style={styles.achievementName}>{achievement.name}</Text>
+                  <Text style={styles.achievementDescription}>{achievement.description}</Text>
+                  <View style={styles.achievementProgress}>
+                    <View style={styles.progressBar}>
+                      <View
+                        style={[
+                          styles.progressFill,
+                          { width: `${achievement.progress}%` }
+                        ]}
+                      />
+                    </View>
+                    <Text style={styles.progressText}>{achievement.progress}%</Text>
+                  </View>
+                </View>
+                {achievement.isUnlocked && (
+                  <Text style={styles.unlockedBadge}>✓</Text>
+                )}
+              </View>
+            ))}
+          </View>
+
+          {/* Badges List */}
+          <View style={styles.badgesList}>
+            <Text style={styles.sectionTitle}>Badges</Text>
+            <View style={styles.badgesGrid}>
+              {badges?.map((badge: any) => (
+                <View
+                  key={badge.id}
+                  style={[
+                    styles.badgeCard,
+                    !badge.earned && styles.badgeCardLocked
+                  ]}
+                >
+                  <View style={[styles.badgeIcon, { backgroundColor: getRarityColor(badge.rarity) }]}>
+                    <Text style={styles.badgeIconText}>{badge.icon || badge.image}</Text>
+                  </View>
+                  <Text style={styles.badgeName}>{badge.name}</Text>
+                  <Text style={styles.badgeDescription}>{badge.description}</Text>
+                  {badge.earned && (
+                    <Text style={styles.earnedBadge}>Earned</Text>
+                  )}
+                </View>
+              ))}
+            </View>
+          </View>
+        </>
+      )}
+    </ScrollView>
+  );
+}
+
+const getRarityColor = (rarity: string) => {
+  switch (rarity) {
+    case 'legendary': return '#FFD700';
+    case 'epic': return '#9D4EDD';
+    case 'rare': return '#2196F3';
+    default: return '#9E9E9E';
+  }
+};
+```
+
+### 7.8 Learning Materials Feature
+
+#### 7.8.1 Learning Materials Screen
+
+```typescript
+// src/screens/learning/LearningMaterialsScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, FlatList, TouchableOpacity, ScrollView } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchBoards, fetchClasses, fetchSubjects, fetchChapters } from '../../store/slices/learningSlice';
+
+export default function LearningMaterialsScreen({ navigation }: any) {
+  const dispatch = useDispatch();
+  const { user } = useSelector((state: RootState) => state.auth);
+  const { boards, classes, subjects, chapters, isLoading } = useSelector((state: RootState) => state.learning);
+  const [selectedBoard, setSelectedBoard] = useState<string | null>(user?.preferences?.learning?.board || null);
+  const [selectedClass, setSelectedClass] = useState<string | null>(user?.preferences?.learning?.class || null);
+  const [selectedSubject, setSelectedSubject] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (user) {
+      dispatch(fetchBoards());
+      if (selectedBoard) {
+        dispatch(fetchClasses({ board: selectedBoard }));
+      }
+      if (selectedClass) {
+        dispatch(fetchSubjects({ board: selectedBoard!, class: selectedClass }));
+      }
+      if (selectedSubject) {
+        dispatch(fetchChapters({ board: selectedBoard!, class: selectedClass!, subject: selectedSubject }));
+      }
+    }
+  }, [user, selectedBoard, selectedClass, selectedSubject]);
+
+  const handleSubjectPress = (subject: any) => {
+    setSelectedSubject(subject.name);
+    navigation.navigate('SubjectDetails', {
+      board: selectedBoard,
+      class: selectedClass,
+      subject: subject.name
+    });
+  };
+
+  const handleChapterPress = (chapter: any) => {
+    navigation.navigate('ChapterDetails', {
+      board: selectedBoard,
+      class: selectedClass,
+      subject: selectedSubject,
+      chapterId: chapter.id,
+      chapterName: chapter.name
+    });
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>Learning Materials</Text>
+      <Text style={styles.subtitle}>
+        {selectedBoard && selectedClass
+          ? `${selectedBoard} • Class ${selectedClass}`
+          : 'Select your board and class'}
+      </Text>
+
+      {/* Board Selection */}
+      {!selectedBoard && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Select Board</Text>
+          <FlatList
+            data={boards}
+            horizontal
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.boardCard}
+                onPress={() => setSelectedBoard(item.name)}
+              >
+                <Text style={styles.boardName}>{item.name}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+
+      {/* Class Selection */}
+      {selectedBoard && !selectedClass && (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Select Class</Text>
+          <FlatList
+            data={classes}
+            numColumns={3}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.classCard}
+                onPress={() => setSelectedClass(item.name)}
+              >
+                <Text style={styles.className}>Class {item.name}</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+
+      {/* Subjects List */}
+      {selectedBoard && selectedClass && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Subjects</Text>
+            <TouchableOpacity
+              style={styles.changeButton}
+              onPress={() => {
+                setSelectedClass(null);
+                setSelectedSubject(null);
+              }}
+            >
+              <Text style={styles.changeButtonText}>Change Class</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={subjects}
+            numColumns={2}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.subjectCard}
+                onPress={() => handleSubjectPress(item)}
+              >
+                <View style={[styles.subjectIcon, { backgroundColor: item.color }]}>
+                  <Text style={styles.subjectIconText}>{item.icon}</Text>
+                </View>
+                <Text style={styles.subjectName}>{item.name}</Text>
+                <Text style={styles.subjectDescription}>{item.description}</Text>
+                <Text style={styles.subjectCount}>{item.bookCount} Books</Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+
+      {/* Chapters List */}
+      {selectedSubject && (
+        <View style={styles.section}>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>{selectedSubject} Chapters</Text>
+            <TouchableOpacity
+              style={styles.changeButton}
+              onPress={() => setSelectedSubject(null)}
+            >
+              <Text style={styles.changeButtonText}>Back</Text>
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={chapters}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={styles.chapterCard}
+                onPress={() => handleChapterPress(item)}
+              >
+                <Text style={styles.chapterName}>{item.name}</Text>
+                <Text style={styles.chapterDescription}>{item.description}</Text>
+                <View style={styles.chapterResources}>
+                  <Text style={styles.resourceCount}>
+                    📚 {item.pdfCount || 0} PDFs
+                  </Text>
+                  <Text style={styles.resourceCount}>
+                    🎥 {item.videoCount || 0} Videos
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
+    </ScrollView>
+  );
+}
+```
+
+#### 7.8.2 Chapter Details Screen
+
+```typescript
+// src/screens/learning/ChapterDetailsScreen.tsx
+import React, { useState, useEffect } from 'react';
+import { View, Text, ScrollView, TouchableOpacity, FlatList } from 'react-native';
+import { useDispatch, useSelector } from 'react-redux';
+import { fetchChapterDetails } from '../../store/slices/learningSlice';
+
+export default function ChapterDetailsScreen({ route, navigation }: any) {
+  const { chapterId, chapterName } = route.params;
+  const dispatch = useDispatch();
+  const { chapterDetails, isLoading } = useSelector((state: RootState) => state.learning);
+  const [selectedTab, setSelectedTab] = useState<'pdfs' | 'videos' | 'chat'>('pdfs');
+
+  useEffect(() => {
+    dispatch(fetchChapterDetails({ chapterId }));
+  }, [chapterId]);
+
+  const handlePdfPress = (pdf: any) => {
+    navigation.navigate('PdfViewer', {
+      pdfId: pdf.id,
+      pdfUrl: pdf.url,
+      pdfName: pdf.name
+    });
+  };
+
+  const handleVideoPress = (video: any) => {
+    navigation.navigate('VideoPlayer', {
+      videoId: video.id,
+      videoUrl: video.url,
+      videoName: video.name
+    });
+  };
+
+  const handleStartChat = () => {
+    navigation.navigate('Chat', {
+      sessionContext: `Chapter: ${chapterName}`,
+      contextType: 'chapter',
+      contextId: chapterId
+    });
+  };
+
+  return (
+    <ScrollView style={styles.container}>
+      <Text style={styles.title}>{chapterName}</Text>
+      {chapterDetails?.description && (
+        <Text style={styles.description}>{chapterDetails.description}</Text>
+      )}
+
+      {/* Tab Selector */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity
+          style={[styles.tab, selectedTab === 'pdfs' && styles.tabActive]}
+          onPress={() => setSelectedTab('pdfs')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'pdfs' && styles.tabTextActive]}>
+            PDFs ({chapterDetails?.pdfs?.length || 0})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, selectedTab === 'videos' && styles.tabActive]}
+          onPress={() => setSelectedTab('videos')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'videos' && styles.tabTextActive]}>
+            Videos ({chapterDetails?.videos?.length || 0})
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={[styles.tab, selectedTab === 'chat' && styles.tabActive]}
+          onPress={() => setSelectedTab('chat')}
+        >
+          <Text style={[styles.tabText, selectedTab === 'chat' && styles.tabTextActive]}>
+            Chat with AI
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Content */}
+      {selectedTab === 'pdfs' && (
+        <View style={styles.contentContainer}>
+          {chapterDetails?.pdfs?.map((pdf: any) => (
+            <TouchableOpacity
+              key={pdf.id}
+              style={styles.resourceCard}
+              onPress={() => handlePdfPress(pdf)}
+            >
+              <Text style={styles.resourceIcon}>📚</Text>
+              <View style={styles.resourceInfo}>
+                <Text style={styles.resourceName}>{pdf.name}</Text>
+                <Text style={styles.resourceMeta}>
+                  {pdf.pageCount} pages • {pdf.size}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {selectedTab === 'videos' && (
+        <View style={styles.contentContainer}>
+          {chapterDetails?.videos?.map((video: any) => (
+            <TouchableOpacity
+              key={video.id}
+              style={styles.resourceCard}
+              onPress={() => handleVideoPress(video)}
+            >
+              <Text style={styles.resourceIcon}>🎥</Text>
+              <View style={styles.resourceInfo}>
+                <Text style={styles.resourceName}>{video.name}</Text>
+                <Text style={styles.resourceMeta}>
+                  {video.duration} • {video.views} views
+                </Text>
+              </View>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
+
+      {selectedTab === 'chat' && (
+        <View style={styles.chatContainer}>
+          <Text style={styles.chatDescription}>
+            Start a conversation with AI about this chapter. Ask questions, get explanations, and learn interactively.
+          </Text>
+          <TouchableOpacity
+            style={styles.startChatButton}
+            onPress={handleStartChat}
+          >
+            <Text style={styles.startChatButtonText}>Start Chat</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+    </ScrollView>
   );
 }
 ```
@@ -1300,6 +3293,247 @@ export default function FocusScreen() {
 ### 8.1 API Service Structure
 
 See `MOBILE_APP_API_LIST.md` for complete API reference.
+
+#### 8.1.1 Complete API Endpoints
+
+```typescript
+// src/services/api/endpoints.ts
+import apiClient from './client';
+
+// Authentication
+export const authApi = {
+  login: (email: string, password: string, deviceInfo?: string) =>
+    apiClient.post('/mobile/auth/login', { email, password, deviceInfo }),
+  
+  signup: (data: SignupData) =>
+    apiClient.post('/mobile/auth/signup', data),
+  
+  verify: (token: string) =>
+    apiClient.post('/mobile/auth/verify', { token }),
+  
+  logout: () =>
+    apiClient.post('/auth/logout'),
+  
+  refresh: (refreshToken: string) =>
+    apiClient.post('/auth/refresh', { refreshToken }),
+  
+  forgotPassword: (email: string) =>
+    apiClient.post('/auth/forgot-password', { email }),
+  
+  resetPassword: (token: string, password: string) =>
+    apiClient.post('/auth/reset-password', { token, password }),
+};
+
+// Chat
+export const chatApi = {
+  sendMessage: (data: ChatMessageData) =>
+    apiClient.post('/mobile/chat', data),
+  
+  getSessions: () =>
+    apiClient.get('/chat/sessions'),
+  
+  createSession: (title: string) =>
+    apiClient.post('/chat/sessions', { title }),
+  
+  getMessages: (sessionId: string) =>
+    apiClient.get(`/chat/sessions/${sessionId}/messages`),
+  
+  exportSession: (sessionId: string) =>
+    apiClient.get(`/chat/export/${sessionId}`),
+};
+
+// Voice
+export const voiceApi = {
+  process: (formData: FormData) =>
+    apiClient.post('/mobile/voice', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+};
+
+// OCR/Image
+export const ocrApi = {
+  process: (formData: FormData) =>
+    apiClient.post('/mobile/ocr', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  
+  getStatus: (taskId: string) =>
+    apiClient.get(`/ocr/status?taskId=${taskId}`),
+};
+
+// Notes
+export const notesApi = {
+  getAll: (userId: string, category?: string, lastSync?: string) =>
+    apiClient.get('/notes', { params: { userId, category, lastSync } }),
+  
+  create: (data: CreateNoteData) =>
+    apiClient.post('/notes', data),
+  
+  update: (id: string, data: UpdateNoteData) =>
+    apiClient.put('/notes', { id, ...data }),
+  
+  delete: (id: string) =>
+    apiClient.delete('/notes', { params: { id } }),
+  
+  generate: (params: {
+    topic?: string;
+    conversationHistory?: any[];
+    format?: string;
+    autoSave?: boolean;
+    category?: string;
+    tags?: string[];
+  }) =>
+    apiClient.post('/notes/generate', params),
+};
+
+// Flashcards
+export const flashcardsApi = {
+  getAll: (userId: string, category?: string, reviewOnly?: boolean) =>
+    apiClient.get('/flashcards', { params: { userId, category, reviewOnly } }),
+  
+  create: (data: CreateFlashcardData) =>
+    apiClient.post('/flashcards', data),
+  
+  update: (id: string, data: UpdateFlashcardData) =>
+    apiClient.put('/flashcards', { id, ...data }),
+  
+  delete: (id: string) =>
+    apiClient.delete('/flashcards', { params: { id } }),
+};
+
+// Mind Maps
+export const mindmapsApi = {
+  getAll: (userId: string, category?: string) =>
+    apiClient.get('/mindmaps', { params: { userId, category } }),
+  
+  create: (data: CreateMindMapData) =>
+    apiClient.post('/mindmaps', data),
+  
+  generate: (data: { topic: string; title: string; category?: string }) =>
+    apiClient.post('/mindmaps', {
+      ...data,
+      generateFromTopic: true,
+    }),
+  
+  update: (id: string, data: UpdateMindMapData) =>
+    apiClient.put('/mindmaps', { id, ...data }),
+  
+  delete: (id: string) =>
+    apiClient.delete('/mindmaps', { params: { id } }),
+};
+
+// Exam
+export const examApi = {
+  generate: (data: {
+    subject: string;
+    topic: string;
+    difficulty: string;
+    questionTypes: Record<string, { count: number; marks: number }>;
+  }) =>
+    apiClient.post('/exam/generate', data),
+  
+  submit: (data: {
+    examId: string;
+    answers: Record<string, any>;
+    timeSpent: number;
+  }) =>
+    apiClient.post('/exam', data),
+  
+  solvePaper: (formData: FormData) =>
+    apiClient.post('/exam/solve-paper', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+  
+  getResults: (examId: string) =>
+    apiClient.get(`/exam?examId=${examId}`),
+};
+
+// Focus Mode
+export const focusApi = {
+  createSession: (data: CreateFocusSessionData) =>
+    apiClient.post('/focus', data),
+  
+  updateSession: (id: string, data: UpdateFocusSessionData) =>
+    apiClient.put('/focus', { id, ...data }),
+  
+  getSessions: (userId: string) =>
+    apiClient.get(`/focus?userId=${userId}`),
+};
+
+// Progress & Analytics
+export const progressApi = {
+  getUsage: (userId: string, period: string) =>
+    apiClient.get(`/usage?userId=${userId}&period=${period}`),
+  
+  getInsights: () =>
+    apiClient.get('/analytics/insights'),
+};
+
+// Achievements
+export const achievementsApi = {
+  getAll: (userId: string) =>
+    apiClient.get(`/achievements?userId=${userId}`),
+  
+  check: (userId: string) =>
+    apiClient.post('/achievements/check', { userId }),
+  
+  forceCheck: () =>
+    apiClient.post('/achievements/force-check'),
+};
+
+// Learning Materials
+export const learningApi = {
+  getBoards: () =>
+    apiClient.get('/admin/learning/boards'),
+  
+  getClasses: (board: string) =>
+    apiClient.get(`/admin/learning/classes?board=${board}`),
+  
+  getSubjects: (board: string, class: string) =>
+    apiClient.get(`/admin/learning/subjects?board=${board}&class=${class}`),
+  
+  getChapters: (board: string, class: string, subject: string) =>
+    apiClient.get(`/learning/${class}/${subject}`),
+  
+  getChapterDetails: (chapterId: string) =>
+    apiClient.get(`/learning/chapter/${chapterId}`),
+};
+
+// Profile & Settings
+export const profileApi = {
+  getProfile: () =>
+    apiClient.get('/mobile/profile'),
+  
+  updateProfile: (data: UpdateProfileData) =>
+    apiClient.put('/mobile/profile', data),
+  
+  uploadAvatar: (formData: FormData) =>
+    apiClient.post('/upload/avatar', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+};
+
+// Subscriptions & Billing
+export const subscriptionApi = {
+  getCurrent: () =>
+    apiClient.get('/subscriptions/current'),
+  
+  create: (data: CreateSubscriptionData) =>
+    apiClient.post('/subscriptions/create', data),
+  
+  update: (data: UpdateSubscriptionData) =>
+    apiClient.put('/subscriptions/update', data),
+  
+  cancel: () =>
+    apiClient.post('/subscriptions/cancel'),
+  
+  getInvoices: () =>
+    apiClient.get('/subscriptions/invoices'),
+  
+  downloadInvoice: (invoiceId: string) =>
+    apiClient.get(`/invoices/${invoiceId}/download`, { responseType: 'blob' }),
+};
+```
 
 ### 8.2 Error Handling
 
@@ -1375,14 +3609,18 @@ import authReducer from './slices/authSlice';
 import chatReducer from './slices/chatSlice';
 import notesReducer from './slices/notesSlice';
 import flashcardsReducer from './slices/flashcardsSlice';
+import mindmapsReducer from './slices/mindmapsSlice';
 import examReducer from './slices/examSlice';
 import focusReducer from './slices/focusSlice';
+import progressReducer from './slices/progressSlice';
+import achievementsReducer from './slices/achievementsSlice';
+import learningReducer from './slices/learningSlice';
 import syncReducer from './slices/syncSlice';
 
 const persistConfig = {
   key: 'root',
   storage: AsyncStorage,
-  whitelist: ['auth', 'notes', 'flashcards'], // Only persist these
+  whitelist: ['auth', 'notes', 'flashcards', 'mindmaps', 'learning'], // Persist these
 };
 
 const rootReducer = combineReducers({
@@ -1390,8 +3628,12 @@ const rootReducer = combineReducers({
   chat: chatReducer,
   notes: notesReducer,
   flashcards: flashcardsReducer,
+  mindmaps: mindmapsReducer,
   exam: examReducer,
   focus: focusReducer,
+  progress: progressReducer,
+  achievements: achievementsReducer,
+  learning: learningReducer,
   sync: syncReducer,
 });
 
@@ -1410,6 +3652,429 @@ export const store = configureStore({
 export const persistor = persistStore(store);
 export type RootState = ReturnType<typeof store.getState>;
 export type AppDispatch = typeof store.dispatch;
+```
+
+#### 9.1.1 Additional Redux Slices
+
+```typescript
+// src/store/slices/mindmapsSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { mindmapsApi } from '../../services/api/endpoints';
+
+export const fetchMindMaps = createAsyncThunk(
+  'mindmaps/fetchMindMaps',
+  async ({ userId, category }: { userId: string; category?: string }) => {
+    const response = await mindmapsApi.getAll(userId, category);
+    return response.data.mindMaps;
+  }
+);
+
+export const generateMindMap = createAsyncThunk(
+  'mindmaps/generateMindMap',
+  async (data: { topic: string; title: string; category?: string }) => {
+    const response = await mindmapsApi.generate(data);
+    return response.data.mindMap;
+  }
+);
+
+export const createMindMap = createAsyncThunk(
+  'mindmaps/createMindMap',
+  async (data: CreateMindMapData) => {
+    const response = await mindmapsApi.create(data);
+    return response.data.mindMap;
+  }
+);
+
+export const updateMindMap = createAsyncThunk(
+  'mindmaps/updateMindMap',
+  async ({ id, ...data }: UpdateMindMapData) => {
+    const response = await mindmapsApi.update(id, data);
+    return response.data.mindMap;
+  }
+);
+
+const mindmapsSlice = createSlice({
+  name: 'mindmaps',
+  initialState: {
+    mindMaps: [],
+    isLoading: false,
+    isGenerating: false,
+    error: null,
+  },
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchMindMaps.fulfilled, (state, action) => {
+        state.mindMaps = action.payload;
+      })
+      .addCase(generateMindMap.pending, (state) => {
+        state.isGenerating = true;
+      })
+      .addCase(generateMindMap.fulfilled, (state, action) => {
+        state.isGenerating = false;
+        state.mindMaps.push(action.payload);
+      })
+      .addCase(createMindMap.fulfilled, (state, action) => {
+        state.mindMaps.push(action.payload);
+      })
+      .addCase(updateMindMap.fulfilled, (state, action) => {
+        const index = state.mindMaps.findIndex(m => m.id === action.payload.id);
+        if (index !== -1) {
+          state.mindMaps[index] = action.payload;
+        }
+      });
+  },
+});
+
+export default mindmapsSlice.reducer;
+```
+
+```typescript
+// src/store/slices/examSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { examApi } from '../../services/api/endpoints';
+
+export const generateExam = createAsyncThunk(
+  'exam/generateExam',
+  async (data: GenerateExamData) => {
+    const response = await examApi.generate(data);
+    return response.data;
+  }
+);
+
+export const submitExam = createAsyncThunk(
+  'exam/submitExam',
+  async (data: SubmitExamData) => {
+    const response = await examApi.submit(data);
+    return response.data;
+  }
+);
+
+export const solveExamPaper = createAsyncThunk(
+  'exam/solvePaper',
+  async (formData: FormData) => {
+    const response = await examApi.solvePaper(formData);
+    return response.data;
+  }
+);
+
+const examSlice = createSlice({
+  name: 'exam',
+  initialState: {
+    currentExam: null,
+    questions: [],
+    results: null,
+    isGenerating: false,
+    isSubmitting: false,
+    isLoading: false,
+    error: null,
+  },
+  reducers: {
+    clearExam: (state) => {
+      state.currentExam = null;
+      state.questions = [];
+      state.results = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(generateExam.pending, (state) => {
+        state.isGenerating = true;
+      })
+      .addCase(generateExam.fulfilled, (state, action) => {
+        state.isGenerating = false;
+        state.currentExam = action.payload.examId;
+        state.questions = action.payload.questions;
+      })
+      .addCase(submitExam.pending, (state) => {
+        state.isSubmitting = true;
+      })
+      .addCase(submitExam.fulfilled, (state, action) => {
+        state.isSubmitting = false;
+        state.results = action.payload;
+      })
+      .addCase(solveExamPaper.fulfilled, (state, action) => {
+        state.results = action.payload;
+      });
+  },
+});
+
+export const { clearExam } = examSlice.actions;
+export default examSlice.reducer;
+```
+
+```typescript
+// src/store/slices/focusSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { focusApi } from '../../services/api/endpoints';
+
+export const createFocusSession = createAsyncThunk(
+  'focus/createSession',
+  async (data: CreateFocusSessionData) => {
+    const response = await focusApi.createSession(data);
+    return response.data.session;
+  }
+);
+
+export const updateFocusSession = createAsyncThunk(
+  'focus/updateSession',
+  async ({ id, ...data }: UpdateFocusSessionData) => {
+    const response = await focusApi.updateSession(id, data);
+    return response.data.session;
+  }
+);
+
+export const fetchFocusSessions = createAsyncThunk(
+  'focus/fetchSessions',
+  async (userId: string) => {
+    const response = await focusApi.getSessions(userId);
+    return response.data.sessions;
+  }
+);
+
+const focusSlice = createSlice({
+  name: 'focus',
+  initialState: {
+    currentSession: null,
+    sessions: [],
+    totalFocusTime: 0,
+    isLoading: false,
+    error: null,
+  },
+  reducers: {
+    setCurrentSession: (state, action) => {
+      state.currentSession = action.payload;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(createFocusSession.fulfilled, (state, action) => {
+        state.currentSession = action.payload;
+        state.sessions.push(action.payload);
+      })
+      .addCase(updateFocusSession.fulfilled, (state, action) => {
+        const index = state.sessions.findIndex(s => s.id === action.payload.id);
+        if (index !== -1) {
+          state.sessions[index] = action.payload;
+        }
+        if (state.currentSession?.id === action.payload.id) {
+          state.currentSession = action.payload;
+        }
+      })
+      .addCase(fetchFocusSessions.fulfilled, (state, action) => {
+        state.sessions = action.payload;
+        state.totalFocusTime = action.payload.reduce((sum: number, s: any) => sum + (s.duration || 0), 0);
+      });
+  },
+});
+
+export const { setCurrentSession } = focusSlice.actions;
+export default focusSlice.reducer;
+```
+
+```typescript
+// src/store/slices/progressSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { progressApi } from '../../services/api/endpoints';
+
+export const fetchProgress = createAsyncThunk(
+  'progress/fetchProgress',
+  async ({ period }: { period: string }) => {
+    // This can be extended to fetch progress data
+    return { period };
+  }
+);
+
+export const fetchUsageData = createAsyncThunk(
+  'progress/fetchUsageData',
+  async ({ userId, period }: { userId: string; period: string }) => {
+    const response = await progressApi.getUsage(userId, period);
+    return response.data;
+  }
+);
+
+export const fetchInsights = createAsyncThunk(
+  'progress/fetchInsights',
+  async () => {
+    const response = await progressApi.getInsights();
+    return response.data.insights;
+  }
+);
+
+const progressSlice = createSlice({
+  name: 'progress',
+  initialState: {
+    progress: null,
+    usageData: null,
+    insights: null,
+    isLoading: false,
+    error: null,
+  },
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchUsageData.fulfilled, (state, action) => {
+        state.usageData = action.payload;
+      })
+      .addCase(fetchInsights.fulfilled, (state, action) => {
+        state.insights = action.payload;
+      });
+  },
+});
+
+export default progressSlice.reducer;
+```
+
+```typescript
+// src/store/slices/achievementsSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { achievementsApi } from '../../services/api/endpoints';
+
+export const fetchAchievements = createAsyncThunk(
+  'achievements/fetchAchievements',
+  async ({ userId }: { userId: string }) => {
+    const response = await achievementsApi.getAll(userId);
+    return {
+      achievements: response.data.achievements,
+      badges: response.data.badges,
+      stats: response.data.stats,
+    };
+  }
+);
+
+export const checkAchievements = createAsyncThunk(
+  'achievements/check',
+  async ({ userId }: { userId: string }) => {
+    const response = await achievementsApi.check(userId);
+    return response.data;
+  }
+);
+
+const achievementsSlice = createSlice({
+  name: 'achievements',
+  initialState: {
+    achievements: [],
+    badges: [],
+    stats: {
+      totalAchievements: 0,
+      unlockedAchievements: 0,
+      totalBadges: 0,
+      earnedBadges: 0,
+    },
+    isLoading: false,
+    error: null,
+  },
+  reducers: {},
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchAchievements.fulfilled, (state, action) => {
+        state.achievements = action.payload.achievements;
+        state.badges = action.payload.badges;
+        state.stats = action.payload.stats;
+      })
+      .addCase(checkAchievements.fulfilled, (state, action) => {
+        // Update achievements and badges if new ones were unlocked
+        if (action.payload.newlyUnlocked) {
+          action.payload.newlyUnlocked.forEach((id: string) => {
+            const achievement = state.achievements.find(a => a.id === id);
+            if (achievement) {
+              achievement.isUnlocked = true;
+            }
+          });
+        }
+      });
+  },
+});
+
+export default achievementsSlice.reducer;
+```
+
+```typescript
+// src/store/slices/learningSlice.ts
+import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
+import { learningApi } from '../../services/api/endpoints';
+
+export const fetchBoards = createAsyncThunk(
+  'learning/fetchBoards',
+  async () => {
+    const response = await learningApi.getBoards();
+    return response.data.boards;
+  }
+);
+
+export const fetchClasses = createAsyncThunk(
+  'learning/fetchClasses',
+  async ({ board }: { board: string }) => {
+    const response = await learningApi.getClasses(board);
+    return response.data.classes;
+  }
+);
+
+export const fetchSubjects = createAsyncThunk(
+  'learning/fetchSubjects',
+  async ({ board, class: classNum }: { board: string; class: string }) => {
+    const response = await learningApi.getSubjects(board, classNum);
+    return response.data.subjects;
+  }
+);
+
+export const fetchChapters = createAsyncThunk(
+  'learning/fetchChapters',
+  async ({ board, class: classNum, subject }: { board: string; class: string; subject: string }) => {
+    const response = await learningApi.getChapters(board, classNum, subject);
+    return response.data.chapters;
+  }
+);
+
+export const fetchChapterDetails = createAsyncThunk(
+  'learning/fetchChapterDetails',
+  async ({ chapterId }: { chapterId: string }) => {
+    const response = await learningApi.getChapterDetails(chapterId);
+    return response.data;
+  }
+);
+
+const learningSlice = createSlice({
+  name: 'learning',
+  initialState: {
+    boards: [],
+    classes: [],
+    subjects: [],
+    chapters: [],
+    chapterDetails: null,
+    isLoading: false,
+    error: null,
+  },
+  reducers: {
+    clearChapters: (state) => {
+      state.chapters = [];
+    },
+    clearChapterDetails: (state) => {
+      state.chapterDetails = null;
+    },
+  },
+  extraReducers: (builder) => {
+    builder
+      .addCase(fetchBoards.fulfilled, (state, action) => {
+        state.boards = action.payload;
+      })
+      .addCase(fetchClasses.fulfilled, (state, action) => {
+        state.classes = action.payload;
+      })
+      .addCase(fetchSubjects.fulfilled, (state, action) => {
+        state.subjects = action.payload;
+      })
+      .addCase(fetchChapters.fulfilled, (state, action) => {
+        state.chapters = action.payload;
+      })
+      .addCase(fetchChapterDetails.fulfilled, (state, action) => {
+        state.chapterDetails = action.payload;
+      });
+  },
+});
+
+export const { clearChapters, clearChapterDetails } = learningSlice.actions;
+export default learningSlice.reducer;
 ```
 
 ### 9.2 Typed Hooks
@@ -2430,6 +5095,163 @@ i18n.use(initReactI18next).init({
 
 ---
 
+## 📝 Complete Feature List
+
+### ✅ All Features Covered in This Guide
+
+#### 🤖 AI-Powered Features
+1. **AI Chat Interface**
+   - Text-based chat with conversation history
+   - Voice input with speech-to-text
+   - Image upload with OCR
+   - PDF upload and extraction
+   - Context-aware responses
+   - Multiple conversation modes (standard, reasoning, explain_why)
+   - Session management and export
+
+2. **AI Notes Generation**
+   - Generate from topic (structured, outline, summary formats)
+   - Generate from conversation history
+   - Auto-save option
+   - Category and tag management
+   - Markdown formatting support
+   - Scientific notation rendering
+
+3. **AI Mind Map Generation**
+   - Generate comprehensive mind maps from topics
+   - Hierarchical structure (central topic → branches → sub-branches → sub-sub-branches)
+   - Manual creation and editing
+   - Color customization
+   - Category organization
+
+4. **AI Exam Generation**
+   - Custom exam generation by subject and topic
+   - Multiple question types: MCQ (1 mark), Short Answer (2 marks), Long Answer (5 marks), Essay (10 marks)
+   - Difficulty levels: Easy, Medium, Hard
+   - Configurable question counts per type
+   - Exam taking interface with timer
+   - Results with detailed explanations
+   - Exam paper solver (upload PDF/image, get solutions)
+
+#### 📚 Learning Tools
+5. **Notes Management**
+   - Create, edit, delete notes
+   - Search and filter by category
+   - Tag system
+   - Markdown support
+   - Scientific notation rendering
+   - Offline support
+
+6. **Flashcards**
+   - Create flashcards with question/answer
+   - Review mode with spaced repetition
+   - Mastery tracking (25%, 50%, 75%, 100%)
+   - Category and difficulty levels
+   - Review-only filtering
+
+7. **Focus Mode (Pomodoro)**
+   - Customizable timer durations (15, 25, 45, 60 minutes)
+   - Start, pause, resume, reset
+   - Session tracking
+   - Total focus time statistics
+
+8. **Learning Materials**
+   - Board selection (CBSE, ICSE, etc.)
+   - Class-based organization (1-12)
+   - Subject-wise content
+   - Chapter-level organization
+   - PDF viewer integration
+   - Video player integration
+   - Chapter-based AI chat
+
+#### 📊 Progress & Analytics
+9. **Progress Dashboard**
+   - Total interactions count
+   - Study time tracking
+   - Learning streak
+   - Average session time
+   - Weekly activity charts
+   - Subject breakdown
+   - Smart learning activity stats
+
+10. **Achievements System**
+    - Achievement unlocking
+    - Progress tracking per achievement
+    - Badge system with rarity levels
+    - Achievement categories (study, streak, mastery, exam, milestone)
+    - Stats dashboard
+
+#### 🔐 Authentication & Profile
+11. **Authentication**
+    - Email/password login
+    - Sign up with email verification
+    - Password reset
+    - Token refresh
+    - Biometric authentication
+    - Device tracking
+
+12. **Profile Management**
+    - Profile information
+    - Avatar upload
+    - Class and board preferences
+    - Settings management
+    - Subscription management
+
+#### 💳 Subscriptions & Billing
+13. **Subscription Management**
+    - View current plan
+    - Upgrade/downgrade plans
+    - Cancel subscription
+    - Invoice history
+    - Download invoices
+
+#### 🔔 Notifications
+14. **Push Notifications**
+    - Achievement unlocks
+    - Streak reminders
+    - Study reminders
+    - Feature updates
+
+#### 📱 Mobile-Specific Features
+15. **Offline Support**
+    - Offline note creation
+    - Offline flashcard review
+    - Sync queue management
+    - Automatic sync when online
+
+16. **File Handling**
+    - Image picker
+    - PDF picker
+    - Document picker
+    - File upload with progress
+    - OCR processing
+
+17. **Voice Features**
+    - Voice recording
+    - Speech-to-text
+    - Text-to-speech (TTS)
+    - Voice input for chat
+
+#### 🎨 UI/UX Features
+18. **Navigation**
+    - Bottom tab navigation
+    - Stack navigation
+    - Drawer navigation
+    - Deep linking support
+
+19. **Accessibility**
+    - Screen reader support
+    - Accessibility labels
+    - Keyboard navigation
+    - High contrast support
+
+20. **Internationalization**
+    - Multi-language support
+    - RTL support
+    - Locale-based formatting
+
+---
+
 ## 📝 Implementation Checklist
 
 ### Phase 1: Foundation (Week 1-2)
@@ -2441,18 +5263,25 @@ i18n.use(initReactI18next).init({
 - [ ] Basic UI components
 
 ### Phase 2: Core Features (Week 3-5)
-- [ ] Chat feature
-- [ ] Notes feature
-- [ ] Flashcards feature
+- [ ] Chat feature with multi-modal input (text, voice, image)
+- [ ] AI-powered notes generation (from topic and conversation)
+- [ ] Notes management (CRUD, search, categories, tags)
+- [ ] Flashcards with mastery tracking
+- [ ] AI-powered mind map generation
+- [ ] Mind map creation and editing
 - [ ] Profile screen
 - [ ] Settings screen
 
 ### Phase 3: Advanced Features (Week 6-8)
-- [ ] Exam mode
-- [ ] Focus mode
-- [ ] Mind maps
-- [ ] Progress tracking
-- [ ] Achievements
+- [ ] AI-powered exam generation (all question types)
+- [ ] Exam taking interface with timer
+- [ ] Exam results and explanations
+- [ ] Exam paper solver (PDF/image upload)
+- [ ] Focus mode (Pomodoro timer)
+- [ ] Progress dashboard with analytics
+- [ ] Achievements and badges system
+- [ ] Learning materials (boards, classes, subjects, chapters)
+- [ ] PDF and video viewers
 
 ### Phase 4: Polish (Week 9-10)
 - [ ] Offline support
