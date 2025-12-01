@@ -92,6 +92,7 @@ POST /api/mobile/chat
 | `PUT` | `/api/notes` | Update note (id in body) | ✅ Implemented |
 | `DELETE` | `/api/notes?id={noteId}` | Delete note | ✅ Implemented |
 | `POST` | `/api/notes/generate` | Generate note from topic | ✅ Implemented |
+| `POST` | `/api/mobile/notes/generate` | Generate note from topic (mobile) | ✅ Implemented |
 
 **Request Example (Create Note):**
 ```json
@@ -106,21 +107,53 @@ POST /api/notes
 }
 ```
 
+**Request Example (Generate Notes - Mobile):**
+```json
+POST /api/mobile/notes/generate
+Authorization: Bearer <jwt_token>
+{
+  "topic": "Photosynthesis",
+  "format": "structured",
+  "autoSave": true,
+  "category": "Biology",
+  "tags": ["biology", "photosynthesis"]
+}
+```
+
+**Request Example (Generate Notes from Conversation - Mobile):**
+```json
+POST /api/mobile/notes/generate
+Authorization: Bearer <jwt_token>
+{
+  "conversationHistory": [
+    {"isUser": true, "text": "What is photosynthesis?"},
+    {"isUser": false, "text": "Photosynthesis is..."}
+  ],
+  "format": "structured",
+  "autoSave": true,
+  "sourceType": "conversation"
+}
+```
+
 **Response Example:**
 ```json
 {
   "success": true,
   "note": {
+    "title": "Photosynthesis - Comprehensive Notes",
+    "content": "## Photosynthesis\n\nPhotosynthesis is...",
+    "summary": "A brief summary of the notes"
+  },
+  "savedNote": {
     "id": "note123",
-    "title": "Math Notes",
-    "content": "Content here...",
-    "category": "Mathematics",
-    "tags": "algebra,geometry",
-    "userId": "user123",
-    "createdAt": "2024-01-15T10:00:00Z",
-    "updatedAt": "2024-01-15T10:00:00Z",
-    "metadata": null
-  }
+    "title": "Photosynthesis - Comprehensive Notes",
+    "content": "## Photosynthesis\n\nPhotosynthesis is...",
+    "category": "Biology",
+    "tags": ["biology", "photosynthesis"],
+    "createdAt": "2024-01-15T10:00:00Z"
+  },
+  "autoSaved": true,
+  "timestamp": "2024-01-15T10:00:00Z"
 }
 ```
 
